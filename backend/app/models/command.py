@@ -3,7 +3,7 @@ from enum import StrEnum
 
 from sqlmodel import Field, SQLModel
 
-from app.models.common import utc_now
+from app.models.common import app_now
 
 
 class CommandStatus(StrEnum):
@@ -24,4 +24,4 @@ class CommandRun(SQLModel, table=True):
     stderr: str | None = None
     duration_ms: int | None = None
     status: CommandStatus = Field(default=CommandStatus.RUNNING, index=True)
-    created_at: datetime = Field(default_factory=utc_now)
+    created_at: datetime = Field(default_factory=app_now)

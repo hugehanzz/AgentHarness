@@ -35,14 +35,15 @@ async function copyPrompt() {
     <div class="panel-header">
       <div>
         <h2 class="panel-title">Prompt Builder</h2>
-        <div class="panel-kicker">Generate handoff prompts for Codex and Claude-DeepSeek</div>
+        <div class="panel-kicker">Build local template prompts for Codex and Claude-DeepSeek</div>
       </div>
+      <span class="local-template-badge">Local Template · No Model API</span>
     </div>
     <div class="copy-row">
       <el-select v-model="selectedType" style="width: 240px">
         <el-option v-for="item in promptTypes" :key="item" :label="item" :value="item" />
       </el-select>
-      <el-button type="primary" :icon="MagicStick" @click="generatePrompt">Generate</el-button>
+      <el-button type="primary" :icon="MagicStick" @click="generatePrompt">Build Prompt</el-button>
       <el-button :icon="CopyDocument" :disabled="!content" @click="copyPrompt">Copy</el-button>
     </div>
     <div v-if="content" class="prompt-box" style="margin-top: 12px;">{{ content }}</div>

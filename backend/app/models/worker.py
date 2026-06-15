@@ -3,7 +3,7 @@ from enum import StrEnum
 
 from sqlmodel import Field, SQLModel
 
-from app.models.common import utc_now
+from app.models.common import app_now
 
 
 class WorkerRole(StrEnum):
@@ -38,7 +38,7 @@ class AgentWorker(SQLModel, table=True):
     status: WorkerStatus = Field(default=WorkerStatus.IDLE, index=True)
     last_heartbeat_at: datetime | None = None
     current_task_id: int | None = Field(default=None, foreign_key="task.id")
-    created_at: datetime = Field(default_factory=utc_now)
+    created_at: datetime = Field(default_factory=app_now)
 
 
 class AgentRun(SQLModel, table=True):

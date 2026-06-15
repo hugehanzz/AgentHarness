@@ -3,7 +3,7 @@ from enum import StrEnum
 
 from sqlmodel import Field, SQLModel
 
-from app.models.common import utc_now
+from app.models.common import app_now
 
 
 class ReviewSeverity(StrEnum):
@@ -27,4 +27,4 @@ class ReviewItem(SQLModel, table=True):
     description: str | None = None
     status: ReviewItemStatus = Field(default=ReviewItemStatus.OPEN, index=True)
     source_file: str | None = Field(default=None, max_length=1000)
-    created_at: datetime = Field(default_factory=utc_now)
+    created_at: datetime = Field(default_factory=app_now)

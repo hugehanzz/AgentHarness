@@ -5,6 +5,19 @@ import { useTasksStore } from '../stores/tasks'
 
 const store = useTasksStore()
 
+function isHumanSupervisor(workerName: string) {
+  return workerName === 'Human Supervisor'
+}
+
+function displayStatus(worker: { name: string; status: string; is_online: boolean }) {
+  if (isHumanSupervisor(worker.name)) return 'ONLINE'
+  return worker.is_online ? worker.status : 'OFFLINE'
+}
+
+function isDisplayOnline(worker: { name: string; is_online: boolean }) {
+  return isHumanSupervisor(worker.name) || worker.is_online
+}
+
 onMounted(() => store.fetchWorkers())
 </script>
 
@@ -13,7 +26,6 @@ onMounted(() => store.fetchWorkers())
     <div class="panel-header">
       <div>
         <h2 class="panel-title">Workers</h2>
-        <div class="panel-kicker">Heartbeat and execution visibility</div>
       </div>
       <el-button class="icon-button" :icon="Refresh" circle @click="store.fetchWorkers" />
     </div>
@@ -34,8 +46,8 @@ onMounted(() => store.fetchWorkers())
           </el-icon>
           {{ worker.role }}
         </span>
-        <span :class="['registry-status', worker.is_online ? 'online' : 'offline']">
-          <i></i>{{ worker.is_online ? worker.status : 'OFFLINE' }}
+        <span :class="['registry-status', isDisplayOnline(worker) ? 'online' : 'offline']">
+          <i></i>{{ displayStatus(worker) }}
         </span>
       </div>
     </div>

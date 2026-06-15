@@ -20,6 +20,7 @@ AgentHarness 参考 Harness 的控制面 / 数据面分离思想：
 - 后端环境：Conda 环境 `agentharness`。
 - 前端：Vue 3、Vite、Element Plus、Pinia、TypeScript。
 - 命令执行：后端使用 `asyncio.create_subprocess_exec`，只允许执行已登记的安全命令。
+- 时间处理：第一版按 `Asia/Shanghai` 北京时间写入数据库。
 
 ## 第一版范围
 
@@ -80,6 +81,7 @@ copy .env.example .env
 
 ```env
 DATABASE_URL=mysql+pymysql://root:123456@localhost:3306/agentharness
+APP_TIMEZONE=Asia/Shanghai
 ```
 
 启动后端：

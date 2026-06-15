@@ -7,6 +7,8 @@ interface State {
   selectedTask: Task | null
   events: TaskEvent[]
   workers: Worker[]
+  detailLoading: boolean
+  detailError: string | null
 }
 
 export const useTasksStore = defineStore('tasks', {
@@ -15,6 +17,8 @@ export const useTasksStore = defineStore('tasks', {
     selectedTask: null,
     events: [],
     workers: [],
+    detailLoading: false,
+    detailError: null,
   }),
   actions: {
     async fetchTasks() {
@@ -22,9 +26,20 @@ export const useTasksStore = defineStore('tasks', {
       this.tasks = data
     },
     async fetchTask(id: number) {
-      const { data } = await api.get<{ task: Task; events: TaskEvent[] }>(`/tasks/${id}`)
-      this.selectedTask = data.task
-      this.events = data.events
+      this.detailLoading = true
+      this.detailError = null
+      this.selectedTask = null
+      this.events = []
+      try {
+        const { data } = await api.get<{ task: Task; events: TaskEvent[] }>(`/tasks/${id}`)
+        this.selectedTask = data.task
+        this.events = data.events
+      } catch (error) {
+        this.detailError = error instanceof Error ? error.message : 'Failed to load task detail'
+        throw error
+      } finally {
+        this.detailLoading = false
+      }
     },
     async createTask(payload: { title: string; description: string; workspace_path?: string }) {
       await api.post('/tasks', payload)

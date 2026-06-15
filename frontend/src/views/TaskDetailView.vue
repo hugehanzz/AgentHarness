@@ -84,18 +84,71 @@ function stageState(stageStatus: TaskStatus) {
   return ''
 }
 
+async function loadTask() {
+  try {
+    await store.fetchTask(taskId)
+  } catch {
+    // The template shows store.detailError instead of rendering a blank page.
+  }
+}
+
 async function transition(toStatus: TaskStatus) {
   await store.transitionTask(taskId, toStatus, `Human Supervisor moved task to ${toStatus}`)
 }
 
 onMounted(() => {
-  store.fetchTask(taskId)
+  loadTask()
   store.fetchWorkers()
 })
 </script>
 
 <template>
-  <div class="layout" v-if="store.selectedTask">
+  <div class="layout" v-if="store.detailLoading">
+    <header class="topbar">
+      <div>
+        <el-button :icon="ArrowLeft" text @click="router.push('/')">Back</el-button>
+        <span class="brand">Loading Task</span>
+        <div class="brand-subtitle">Fetching workflow detail</div>
+      </div>
+    </header>
+    <main class="content">
+      <div class="panel">
+        <el-skeleton :rows="8" animated />
+      </div>
+    </main>
+  </div>
+
+  <div class="layout" v-else-if="store.detailError || !store.selectedTask">
+    <header class="topbar">
+      <div>
+        <el-button :icon="ArrowLeft" text @click="router.push('/')">Back</el-button>
+        <span class="brand">Task Detail Unavailable</span>
+        <div class="brand-subtitle">The workflow detail request did not complete</div>
+      </div>
+    </header>
+    <main class="content">
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">Cannot load task detail</h2>
+            <div class="panel-kicker">Check backend service, task id, and browser console.</div>
+          </div>
+        </div>
+        <el-alert
+          :title="store.detailError || 'Task detail is empty'"
+          type="error"
+          show-icon
+          :closable="false"
+        />
+        <div class="copy-row" style="margin-top: 16px;">
+          <el-button :icon="ArrowLeft" @click="router.push('/')">Back to Workflow Board</el-button>
+          <el-button type="primary" :icon="Refresh" @click="loadTask">Retry</el-button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div class="layout" v-else>
     <header class="topbar">
       <div>
         <el-button :icon="ArrowLeft" text @click="router.push('/')">Back</el-button>
@@ -104,7 +157,7 @@ onMounted(() => {
       </div>
       <div class="toolbar">
         <el-tag type="primary" effect="plain">{{ store.selectedTask.status }}</el-tag>
-        <el-button :icon="Refresh" @click="store.fetchTask(taskId)">Refresh</el-button>
+        <el-button :icon="Refresh" @click="loadTask">Refresh</el-button>
       </div>
     </header>
 

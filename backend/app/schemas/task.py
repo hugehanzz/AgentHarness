@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from app.core.state_machine import TaskStatus
 from app.models.task import TaskPriority
@@ -14,6 +14,8 @@ class TaskCreate(BaseModel):
 
 
 class TaskRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     title: str
     description: str
@@ -32,6 +34,8 @@ class TaskTransitionRequest(BaseModel):
 
 
 class TaskEventRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     task_id: int
     event_type: str

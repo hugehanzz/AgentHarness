@@ -1,5 +1,9 @@
-from datetime import datetime, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+from app.core.config import get_settings
 
 
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+def app_now() -> datetime:
+    timezone_name = get_settings().app_timezone
+    return datetime.now(ZoneInfo(timezone_name)).replace(tzinfo=None)

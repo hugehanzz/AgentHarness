@@ -2,17 +2,20 @@ import re
 from pathlib import Path
 
 from fastapi import HTTPException
-from sqlmodel import Session
+from sqlmodel import Session, delete
 
-from app.models.review import ReviewItem, ReviewSeverity
+from app.models.review import ReviewItem, ReviewItemStatus, ReviewSeverity
 from app.schemas.review import ParsedReviewItem, ReviewParseResult
 
 
 SEVERITY_PATTERNS = {
-    "HIGH": re.compile(r"\b(high|高|高危|严重)\b|^高[:：]", re.IGNORECASE),
-    "MEDIUM": re.compile(r"\b(medium|中|中等)\b|^中[:：]", re.IGNORECASE),
-    "LOW": re.compile(r"\b(low|低|轻微)\b|^低[:：]", re.IGNORECASE),
+    "HIGH": re.compile(r"\bhigh\b|高危|严重|^高[:：]", re.IGNORECASE),
+    "MEDIUM": re.compile(r"\bmedium\b|中等|^中[:：]", re.IGNORECASE),
+    "LOW": re.compile(r"\blow\b|轻微|^低[:：]", re.IGNORECASE),
 }
+
+OPEN_MARKERS = ("[ ]", "待修复", "未解决", "TODO")
+IGNORED_SECTIONS = ("severity summary", "问题级别汇总", "严重级别汇总", "统计", "summary")
 
 
 def parse_review_file(workspace_path: str, session: Session | None = None, task_id: int | None = None) -> ReviewParseResult:
@@ -30,6 +33,7 @@ def parse_review_file(workspace_path: str, session: Session | None = None, task_
     recheck_status = _extract_recheck_status(content)
 
     if session and task_id is not None:
+        session.exec(delete(ReviewItem).where(ReviewItem.task_id == task_id))
         for item in items:
             session.add(
                 ReviewItem(
@@ -37,7 +41,8 @@ def parse_review_file(workspace_path: str, session: Session | None = None, task_
                     severity=ReviewSeverity(item.severity),
                     title=item.title[:300],
                     description=item.description,
-                    status=item.status,
+                    status=ReviewItemStatus(item.status),
+                    source_file=str(review_path),
                 )
             )
         session.commit()
@@ -67,18 +72,35 @@ def _extract_current_task(lines: list[str]) -> str | None:
 
 def _extract_items(lines: list[str]) -> list[ParsedReviewItem]:
     items: list[ParsedReviewItem] = []
+    current_section = ""
     for line in lines:
         stripped = line.strip()
+        if stripped.startswith("#"):
+            current_section = stripped.strip("# ").lower()
+            continue
+        if _is_ignored_section(current_section):
+            continue
         if not stripped.startswith(("-", "*")):
             continue
-        status = "OPEN" if "[ ]" in stripped or any(key in stripped for key in ["待修复", "未解决", "TODO"]) else "RESOLVED"
+
         severity = _detect_severity(stripped)
+        status = "OPEN" if any(marker in stripped for marker in OPEN_MARKERS) else "RESOLVED"
         if severity == "UNKNOWN" and status != "OPEN":
             continue
+
         title = re.sub(r"^[-*]\s*(\[[ xX]\])?\s*", "", stripped)
-        title = re.sub(r"^(High|Medium|Low|高|中|低|高危|中等|轻微)[:：]\s*", "", title, flags=re.IGNORECASE)
+        title = re.sub(
+            r"^(High|Medium|Low|高|中|低|高危|中等|轻微)[:：]\s*",
+            "",
+            title,
+            flags=re.IGNORECASE,
+        )
         items.append(ParsedReviewItem(severity=severity, title=title or stripped, status=status))
     return items
+
+
+def _is_ignored_section(section: str) -> bool:
+    return any(marker in section for marker in IGNORED_SECTIONS)
 
 
 def _detect_severity(text: str) -> str:

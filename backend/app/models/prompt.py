@@ -3,7 +3,7 @@ from enum import StrEnum
 
 from sqlmodel import Field, SQLModel
 
-from app.models.common import utc_now
+from app.models.common import app_now
 
 
 class PromptType(StrEnum):
@@ -21,4 +21,4 @@ class PromptRecord(SQLModel, table=True):
     task_id: int = Field(index=True, foreign_key="task.id")
     prompt_type: PromptType = Field(index=True)
     content: str
-    created_at: datetime = Field(default_factory=utc_now)
+    created_at: datetime = Field(default_factory=app_now)

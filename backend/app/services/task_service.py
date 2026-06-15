@@ -1,9 +1,8 @@
-from datetime import datetime, timezone
-
 from fastapi import HTTPException
 from sqlmodel import Session, select
 
 from app.core.state_machine import TaskStatus, can_transition
+from app.models.common import app_now
 from app.models.task import Task, TaskEvent
 from app.schemas.task import TaskCreate
 
@@ -46,9 +45,9 @@ def transition_task(session: Session, task_id: int, to_status: TaskStatus, messa
     if not can_transition(from_status, to_status):
         raise HTTPException(status_code=400, detail=f"Invalid transition: {from_status} -> {to_status}")
     task.status = to_status
-    task.updated_at = datetime.now(timezone.utc)
+    task.updated_at = app_now()
     if to_status == TaskStatus.ARCHIVED:
-        task.archived_at = datetime.now(timezone.utc)
+        task.archived_at = app_now()
     event = TaskEvent(
         task_id=task.id,
         event_type="TASK_TRANSITIONED",

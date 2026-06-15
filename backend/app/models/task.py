@@ -4,7 +4,7 @@ from enum import StrEnum
 from sqlmodel import Field, SQLModel
 
 from app.core.state_machine import TaskStatus
-from app.models.common import utc_now
+from app.models.common import app_now
 
 
 class TaskPriority(StrEnum):
@@ -20,8 +20,8 @@ class Task(SQLModel, table=True):
     workspace_path: str | None = Field(default=None, max_length=1000)
     status: TaskStatus = Field(default=TaskStatus.REQUIREMENT_DRAFT, index=True)
     priority: TaskPriority = Field(default=TaskPriority.MEDIUM)
-    created_at: datetime = Field(default_factory=utc_now)
-    updated_at: datetime = Field(default_factory=utc_now)
+    created_at: datetime = Field(default_factory=app_now)
+    updated_at: datetime = Field(default_factory=app_now)
     archived_at: datetime | None = None
 
 
@@ -33,4 +33,4 @@ class TaskEvent(SQLModel, table=True):
     to_status: TaskStatus | None = None
     message: str | None = None
     created_by: str = Field(default="system", max_length=100)
-    created_at: datetime = Field(default_factory=utc_now)
+    created_at: datetime = Field(default_factory=app_now)
