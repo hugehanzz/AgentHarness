@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Connection, List, Plus, Refresh, Share, UserFilled } from '@element-plus/icons-vue'
+import { Connection, FolderOpened, List, Plus, Refresh, Share, UserFilled } from '@element-plus/icons-vue'
+import FolderPickerDialog from '../components/FolderPickerDialog.vue'
 import WorkerStatus from '../components/WorkerStatus.vue'
 import { useTasksStore } from '../stores/tasks'
 
 const store = useTasksStore()
 const router = useRouter()
+const folderPickerVisible = ref(false)
 const form = reactive({
   title: '',
   description: '',
@@ -36,6 +38,10 @@ const gateTasks = computed(() =>
 const onlineWorkers = computed(() =>
   store.workers.filter((worker) => worker.is_online || worker.name === 'Human Supervisor').length,
 )
+
+function formatTimestamp(value: string) {
+  return value.replace('T', ' ')
+}
 
 onMounted(() => {
   store.fetchTasks()
@@ -75,18 +81,21 @@ onMounted(() => {
           <div class="panel-header">
             <div>
               <h2 class="panel-title">New Requirement</h2>
-              <div class="panel-kicker">Create a supervised workflow entry</div>
             </div>
           </div>
           <el-form label-position="top">
             <el-form-item label="Title">
-              <el-input v-model="form.title" placeholder="Internal desk approval module" />
+              <el-input v-model="form.title" placeholder="例如：员工请假审批流程优化" />
             </el-form-item>
             <el-form-item label="Workspace Path">
-              <el-input v-model="form.workspace_path" placeholder="D:\project\workspace" />
+              <el-input v-model="form.workspace_path" placeholder="D:\project\workspace">
+                <template #append>
+                  <el-button class="folder-trigger" :icon="FolderOpened" @click="folderPickerVisible = true" />
+                </template>
+              </el-input>
             </el-form-item>
             <el-form-item label="Description">
-              <el-input v-model="form.description" type="textarea" :rows="7" placeholder="Describe the requirement, gates, risks, and expected acceptance signals." />
+              <el-input v-model="form.description" type="textarea" :rows="7" placeholder="请描述需求背景、目标、约束、风险点和验收标准。" />
             </el-form-item>
             <el-button class="primary-action" type="primary" :icon="Plus" @click="createTask">Create Workflow</el-button>
           </el-form>
@@ -98,7 +107,6 @@ onMounted(() => {
         <div class="panel-header">
           <div>
             <h2 class="panel-title">Workflow Board</h2>
-            <div class="panel-kicker">Demand, implementation, review, fix, acceptance, archive</div>
           </div>
         </div>
 
@@ -152,9 +160,18 @@ onMounted(() => {
               <span :class="['priority-pill', `priority-${row.priority}`]">{{ row.priority }}</span>
             </template>
           </el-table-column>
-          <el-table-column prop="updated_at" label="Updated" min-width="180" />
+          <el-table-column label="Updated" min-width="180">
+            <template #default="{ row }">
+              {{ formatTimestamp(row.updated_at) }}
+            </template>
+          </el-table-column>
         </el-table>
       </section>
     </main>
+    <FolderPickerDialog
+      v-model="folderPickerVisible"
+      :initial-path="form.workspace_path"
+      @select="(path) => (form.workspace_path = path)"
+    />
   </div>
 </template>
