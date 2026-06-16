@@ -19,6 +19,9 @@ frontend/dist/
 .idea/
 .vscode/
 
+# Local agent instructions
+AGENTS.md
+
 # OS
 .DS_Store
 Thumbs.db
