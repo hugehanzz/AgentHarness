@@ -258,14 +258,16 @@ onMounted(() => {
   </div>
 
   <div class="layout" v-else>
-    <header class="topbar">
-      <div>
-        <el-button :icon="ArrowLeft" text @click="router.push('/')">Back</el-button>
-        <span class="brand">{{ store.selectedTask.title }}</span>
+    <header class="topbar detail-topbar">
+      <div class="detail-title-block">
+        <div class="detail-title-row">
+          <el-button :icon="ArrowLeft" text @click="router.push('/')">Back</el-button>
+          <span class="brand">{{ store.selectedTask.title }}</span>
+        </div>
         <div class="brand-subtitle">{{ store.selectedTask.workspace_path || 'No workspace path configured' }}</div>
       </div>
       <div class="toolbar">
-        <el-tag type="primary" effect="plain">{{ statusLabel(store.selectedTask.status) }}</el-tag>
+        <el-tag class="detail-status-tag" type="primary" effect="plain">{{ statusLabel(store.selectedTask.status) }}</el-tag>
         <el-button :icon="Refresh" @click="loadTask">Refresh</el-button>
       </div>
     </header>

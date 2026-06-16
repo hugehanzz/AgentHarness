@@ -23,13 +23,12 @@ async function run(commandKey: string) {
     <div class="panel-header">
       <div>
         <h2 class="panel-title">Safe Commands</h2>
-        <div class="panel-kicker">Whitelist execution only, no arbitrary shell input</div>
       </div>
     </div>
     <el-input v-model="workspacePath" placeholder="Workspace path" style="margin-bottom: 12px;" />
     <el-space wrap>
-      <el-button :icon="Operation" @click="run('git_status')">git status</el-button>
-      <el-button :icon="Operation" @click="run('git_diff_stat')">git diff --stat</el-button>
+      <el-button :icon="Operation" disabled @click="run('git_status')">git status</el-button>
+      <el-button :icon="Operation" disabled @click="run('git_diff_stat')">git diff --stat</el-button>
     </el-space>
     <div v-if="result" style="margin-top: 12px;">
       <el-tag :type="result.status === 'SUCCEEDED' ? 'success' : 'danger'">{{ result.status }}</el-tag>

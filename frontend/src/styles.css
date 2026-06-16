@@ -113,6 +113,40 @@ body {
   flex-wrap: wrap;
 }
 
+.detail-topbar {
+  padding-block: 11px;
+}
+
+.detail-title-block {
+  min-width: 0;
+}
+
+.detail-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.detail-title-row .el-button {
+  margin-left: -8px;
+}
+
+.detail-title-block .brand-subtitle {
+  margin-top: 6px;
+}
+
+.detail-status-tag {
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 7px;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.detail-topbar .toolbar > .el-button {
+  min-height: 34px;
+}
+
 .content {
   position: relative;
   z-index: 1;
