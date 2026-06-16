@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Connection, FolderOpened, List, Plus, Refresh, Share, UserFilled } from '@element-plus/icons-vue'
+import { FolderOpened, List, Plus, Refresh, Share, UserFilled } from '@element-plus/icons-vue'
 import FolderPickerDialog from '../components/FolderPickerDialog.vue'
 import WorkerStatus from '../components/WorkerStatus.vue'
 import { useTasksStore } from '../stores/tasks'
+import type { TaskStatus } from '../api/types'
 
 const store = useTasksStore()
 const router = useRouter()
@@ -39,6 +40,34 @@ const onlineWorkers = computed(() =>
   store.workers.filter((worker) => worker.is_online || worker.name === 'Human Supervisor').length,
 )
 
+const flowStageLabels: Record<TaskStatus, string> = {
+  REQUIREMENT_DRAFT: 'Requirement',
+  PLAN_REQUESTED: 'Plan',
+  PLAN_READY: 'Plan',
+  PLAN_CONFIRMED: 'Plan',
+  IMPLEMENTING: 'Build',
+  IMPLEMENT_DONE: 'Build',
+  REVIEW_REQUESTED: 'Review',
+  REVIEW_DONE: 'Review',
+  FIX_REQUIRED: 'Fix',
+  FIXING: 'Fix',
+  FIX_DONE: 'Fix',
+  RECHECK_REQUESTED: 'Recheck',
+  RECHECK_DONE: 'Recheck',
+  ACCEPTANCE_READY: 'Accept',
+  ACCEPTANCE_PASSED: 'Accept',
+  ARCHIVED: 'Archive',
+  DONE: 'Done',
+}
+
+function flowStageLabel(status: TaskStatus) {
+  return flowStageLabels[status] || status
+}
+
+function flowStageClass(status: TaskStatus) {
+  return flowStageLabel(status) === 'Done' ? 'status-stage-done' : 'status-stage-active'
+}
+
 function formatTimestamp(value: string) {
   return value.replace('T', ' ')
 }
@@ -59,17 +88,14 @@ onMounted(() => {
         </div>
         <div>
           <div class="brand">AgentHarness</div>
-          <div class="brand-subtitle">Local multi-agent R&amp;D workflow controller</div>
+          <div class="brand-subtitle">Human-supervised agent workflow</div>
         </div>
       </div>
       <div class="toolbar">
         <div class="status-hub">
+          <i></i>
           <strong>{{ onlineWorkers }}/{{ store.workers.length || 0 }}</strong>
-          <div>
-            <div>Worker Status Hub</div>
-            <span><i></i>{{ onlineWorkers }} Workers Online</span>
-          </div>
-          <el-icon><Connection /></el-icon>
+          <span>Online</span>
         </div>
         <el-button class="soft-button" :icon="Refresh" @click="store.fetchTasks">Refresh</el-button>
       </div>
@@ -152,12 +178,7 @@ onMounted(() => {
           </el-table-column>
           <el-table-column label="Status" min-width="190">
             <template #default="{ row }">
-              <span class="status-pill">{{ row.status }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="Priority" width="130">
-            <template #default="{ row }">
-              <span :class="['priority-pill', `priority-${row.priority}`]">{{ row.priority }}</span>
+              <span :class="['status-pill', flowStageClass(row.status)]">{{ flowStageLabel(row.status) }}</span>
             </template>
           </el-table-column>
           <el-table-column label="Updated" min-width="180">

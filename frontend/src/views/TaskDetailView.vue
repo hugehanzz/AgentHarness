@@ -57,21 +57,22 @@ const nextStatusMap: Partial<Record<TaskStatus, TaskStatus[]>> = {
   ARCHIVED: ['DONE'],
 }
 
-const compactStages: Array<{ label: string; status: TaskStatus }> = [
-  { label: 'Requirement', status: 'REQUIREMENT_DRAFT' },
-  { label: 'Plan', status: 'PLAN_READY' },
-  { label: 'Build', status: 'IMPLEMENT_DONE' },
-  { label: 'Review', status: 'REVIEW_DONE' },
-  { label: 'Fix', status: 'FIX_DONE' },
-  { label: 'Recheck', status: 'RECHECK_DONE' },
-  { label: 'Accept', status: 'ACCEPTANCE_READY' },
-  { label: 'Archive', status: 'ARCHIVED' },
-  { label: 'Done', status: 'DONE' },
+const compactStages: Array<{ label: string; statuses: TaskStatus[] }> = [
+  { label: 'Requirement', statuses: ['REQUIREMENT_DRAFT'] },
+  { label: 'Plan', statuses: ['PLAN_REQUESTED', 'PLAN_READY', 'PLAN_CONFIRMED'] },
+  { label: 'Build', statuses: ['IMPLEMENTING', 'IMPLEMENT_DONE'] },
+  { label: 'Review', statuses: ['REVIEW_REQUESTED', 'REVIEW_DONE'] },
+  { label: 'Fix', statuses: ['FIX_REQUIRED', 'FIXING', 'FIX_DONE'] },
+  { label: 'Recheck', statuses: ['RECHECK_REQUESTED', 'RECHECK_DONE'] },
+  { label: 'Accept', statuses: ['ACCEPTANCE_READY', 'ACCEPTANCE_PASSED'] },
+  { label: 'Archive', statuses: ['ARCHIVED'] },
+  { label: 'Done', statuses: ['DONE'] },
 ]
 
-const activeStep = computed(() => {
+const activeStageIndex = computed(() => {
   if (!store.selectedTask) return 0
-  return statuses.indexOf(store.selectedTask.status)
+  const index = compactStages.findIndex((stage) => stage.statuses.includes(store.selectedTask!.status))
+  return index >= 0 ? index : 0
 })
 
 const nextStatuses = computed(() => {
@@ -83,11 +84,81 @@ const requirementChanged = computed(() => {
   return requirementDraft.value.trim() !== (store.selectedTask?.description || '').trim()
 })
 
-function stageState(stageStatus: TaskStatus) {
-  const stageIndex = statuses.indexOf(stageStatus)
+const actionLabels: Partial<Record<TaskStatus, string>> = {
+  PLAN_REQUESTED: '请求计划',
+  PLAN_READY: '计划已准备',
+  PLAN_CONFIRMED: '确认计划',
+  IMPLEMENTING: '开始开发',
+  IMPLEMENT_DONE: '标记开发完成',
+  REVIEW_REQUESTED: '请求评审',
+  REVIEW_DONE: '标记评审完成',
+  FIX_REQUIRED: '要求修复',
+  FIXING: '开始修复',
+  FIX_DONE: '标记修复完成',
+  RECHECK_REQUESTED: '请求复审',
+  RECHECK_DONE: '标记复审完成',
+  ACCEPTANCE_READY: '进入验收',
+  ACCEPTANCE_PASSED: '标记验收通过',
+  ARCHIVED: '归档任务',
+  DONE: '标记完成',
+}
+
+const statusLabels: Record<TaskStatus, string> = {
+  REQUIREMENT_DRAFT: '需求草稿',
+  PLAN_REQUESTED: '请求计划',
+  PLAN_READY: '计划待确认',
+  PLAN_CONFIRMED: '计划已确认',
+  IMPLEMENTING: '开发中',
+  IMPLEMENT_DONE: '开发完成',
+  REVIEW_REQUESTED: '请求评审',
+  REVIEW_DONE: '评审完成',
+  FIX_REQUIRED: '需要修复',
+  FIXING: '修复中',
+  FIX_DONE: '修复完成',
+  RECHECK_REQUESTED: '请求复审',
+  RECHECK_DONE: '复审完成',
+  ACCEPTANCE_READY: '待验收',
+  ACCEPTANCE_PASSED: '验收通过',
+  ARCHIVED: '已归档',
+  DONE: '完成',
+}
+
+const eventTypeLabels: Record<string, string> = {
+  TASK_CREATED: '任务创建',
+  TASK_TRANSITIONED: '流程流转',
+  REQUIREMENT_UPDATED: '需求更新',
+}
+
+function actionLabel(status: TaskStatus) {
+  return actionLabels[status] || status
+}
+
+function statusLabel(status: TaskStatus | null) {
+  return status ? statusLabels[status] || status : '-'
+}
+
+function eventTypeLabel(type: string) {
+  return eventTypeLabels[type] || type
+}
+
+function eventTitle(event: { event_type: string; from_status: TaskStatus | null; to_status: TaskStatus | null }) {
+  if (event.event_type === 'TASK_TRANSITIONED') {
+    return `${statusLabel(event.from_status)} -> ${statusLabel(event.to_status)}`
+  }
+  if (event.event_type === 'TASK_CREATED') {
+    return `${eventTypeLabel(event.event_type)} -> ${statusLabel(event.to_status)}`
+  }
+  return eventTypeLabel(event.event_type)
+}
+
+function formatTimestamp(value: string) {
+  return value.replace('T', ' ')
+}
+
+function stageState(stageIndex: number) {
   if (!store.selectedTask) return ''
-  if (store.selectedTask.status === stageStatus) return 'is-active'
-  if (activeStep.value >= stageIndex) return 'is-done'
+  if (activeStageIndex.value === stageIndex) return 'is-active'
+  if (activeStageIndex.value > stageIndex) return 'is-done'
   return ''
 }
 
@@ -100,7 +171,7 @@ async function loadTask() {
 }
 
 async function transition(toStatus: TaskStatus) {
-  await store.transitionTask(taskId, toStatus, `Human Supervisor moved task to ${toStatus}`)
+  await store.transitionTask(taskId, toStatus, `Human Supervisor: ${actionLabel(toStatus)}`)
 }
 
 function startRequirementEdit() {
@@ -194,7 +265,7 @@ onMounted(() => {
         <div class="brand-subtitle">{{ store.selectedTask.workspace_path || 'No workspace path configured' }}</div>
       </div>
       <div class="toolbar">
-        <el-tag type="primary" effect="plain">{{ store.selectedTask.status }}</el-tag>
+        <el-tag type="primary" effect="plain">{{ statusLabel(store.selectedTask.status) }}</el-tag>
         <el-button :icon="Refresh" @click="loadTask">Refresh</el-button>
       </div>
     </header>
@@ -204,16 +275,15 @@ onMounted(() => {
         <div class="panel-header">
           <div>
             <h2 class="panel-title">Flow State</h2>
-            <div class="panel-kicker">Human Supervisor remains the gate owner</div>
           </div>
-          <span class="status-pill">{{ activeStep + 1 }} / {{ statuses.length }}</span>
+          <span class="status-pill">{{ activeStageIndex + 1 }} / {{ compactStages.length }}</span>
         </div>
 
         <div class="workflow-strip">
           <div
             v-for="(stage, index) in compactStages"
-            :key="stage.status"
-            :class="['workflow-step', stageState(stage.status)]"
+            :key="stage.label"
+            :class="['workflow-step', stageState(index)]"
           >
             <div class="workflow-index">0{{ index + 1 }}</div>
             <div class="workflow-label">{{ stage.label }}</div>
@@ -228,7 +298,7 @@ onMounted(() => {
             :icon="status === 'ACCEPTANCE_PASSED' ? Check : Right"
             @click="transition(status)"
           >
-            {{ status }}
+            {{ actionLabel(status) }}
           </el-button>
         </div>
       </section>
@@ -278,19 +348,18 @@ onMounted(() => {
         </div>
 
         <div class="grid">
-          <PromptPanel :task-id="taskId" />
+          <PromptPanel :task-id="taskId" :current-status="store.selectedTask.status" />
           <ReviewPanel :task-id="taskId" :workspace-path="store.selectedTask.workspace_path" />
           <CommandPanel :task-id="taskId" :workspace-path="store.selectedTask.workspace_path" />
           <div class="panel">
             <div class="panel-header">
               <div>
                 <h2 class="panel-title">Events</h2>
-                <div class="panel-kicker">State transitions and supervisor actions</div>
               </div>
             </div>
             <el-timeline>
-              <el-timeline-item v-for="event in store.events" :key="event.id" :timestamp="event.created_at">
-                {{ event.event_type }} · {{ event.from_status || '-' }} -> {{ event.to_status || '-' }}
+              <el-timeline-item v-for="event in store.events" :key="event.id" :timestamp="formatTimestamp(event.created_at)">
+                {{ eventTitle(event) }}
                 <div class="muted">{{ event.message }}</div>
               </el-timeline-item>
             </el-timeline>

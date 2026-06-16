@@ -28,7 +28,7 @@ onMounted(load)
     <div class="panel-header">
       <div>
         <h2 class="panel-title">Acceptance</h2>
-        <div class="panel-kicker">Evidence remains confirmed by the Human Supervisor</div>
+        <div class="panel-kicker">Human acceptance checklist</div>
       </div>
     </div>
     <el-input v-model="title" placeholder="Acceptance item">

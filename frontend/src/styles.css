@@ -346,6 +346,16 @@ body {
   white-space: nowrap;
 }
 
+.status-stage-active {
+  color: #946300;
+  background: var(--warning-soft);
+}
+
+.status-stage-done {
+  color: #075f66;
+  background: var(--primary-soft);
+}
+
 .priority-pill {
   display: inline-flex;
   padding: 4px 9px;
@@ -376,46 +386,32 @@ body {
 .status-hub {
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-width: 210px;
-  min-height: 44px;
-  padding: 7px 10px;
-  border: 1px solid #ddd9cf;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.86);
-  box-shadow: 0 6px 16px rgba(27, 34, 43, 0.08);
+  gap: 7px;
+  min-height: 34px;
+  padding: 6px 11px;
+  border: 1px solid #d9e3e4;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
 }
 
 .status-hub strong {
   color: #0b6671;
-  font-size: 18px;
-}
-
-.status-hub div {
-  color: #101828;
-  font-size: 12px;
-  line-height: 1.15;
+  font-size: 15px;
+  line-height: 1;
 }
 
 .status-hub span {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
   color: #475467;
-  font-size: 11px;
+  font-size: 12px;
+  line-height: 1;
 }
 
-.status-hub span i {
+.status-hub > i {
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: #28b463;
-}
-
-.status-hub > .el-icon {
-  margin-left: auto;
-  color: #0b6671;
-  font-size: 20px;
+  flex: 0 0 auto;
 }
 
 .priority-MEDIUM {
