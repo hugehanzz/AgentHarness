@@ -213,6 +213,86 @@ body {
   flex: 0 0 auto;
 }
 
+.review-metric-row {
+  gap: 10px;
+}
+
+.review-metric {
+  align-items: flex-start;
+  min-height: 76px;
+}
+
+.review-metric-high {
+  border-color: #f2b8b5;
+  background: linear-gradient(135deg, #fffafa 0%, #fff0f0 100%);
+}
+
+.review-metric-high .metric-value,
+.review-metric-high .metric-label {
+  color: #b42318;
+}
+
+.review-metric-medium {
+  border-color: #efd48b;
+  background: linear-gradient(135deg, #fffdf5 0%, #fff7df 100%);
+}
+
+.review-metric-medium .metric-value,
+.review-metric-medium .metric-label {
+  color: #946300;
+}
+
+.review-metric-low {
+  border-color: #a6dfbd;
+  background: linear-gradient(135deg, #fbfffc 0%, #e9f8ef 100%);
+}
+
+.review-metric-low .metric-value,
+.review-metric-low .metric-label {
+  color: #027a48;
+}
+
+.review-metric-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.review-metric-footer .metric-label {
+  margin-top: 0;
+}
+
+.recheck-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.recheck-PASSED {
+  color: #027a48;
+  background: #ddf6e7;
+}
+
+.recheck-FAILED {
+  color: #b42318;
+  background: #fde2e1;
+}
+
+.recheck-PENDING,
+.recheck-NOT_REQUIRED,
+.recheck-UNKNOWN {
+  color: #475467;
+  background: #eef0f2;
+}
+
 .grid {
   display: grid;
   gap: 16px;
@@ -480,20 +560,20 @@ body {
 
 .requirement-text {
   margin: 0;
+  min-height: 48px;
+  padding: 10px 12px;
+  border: 1px solid #e2e5e8;
+  border-radius: 7px;
+  background: #f9fbfd;
   color: #344054;
   line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
-.path-box {
-  margin-top: 12px;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: var(--surface-soft);
-  color: var(--muted);
-  font-family: "Cascadia Mono", Consolas, monospace;
-  font-size: 12px;
-  word-break: break-all;
+.requirement-editor {
+  display: grid;
+  gap: 10px;
 }
 
 .icon-button {

@@ -50,6 +50,11 @@ export const useTasksStore = defineStore('tasks', {
       await this.fetchTask(id)
       await this.fetchTasks()
     },
+    async updateRequirement(id: number, description: string) {
+      await api.patch(`/tasks/${id}/requirement`, { description })
+      await this.fetchTask(id)
+      await this.fetchTasks()
+    },
     async fetchWorkers() {
       const { data } = await api.get<Worker[]>('/workers')
       this.workers = data

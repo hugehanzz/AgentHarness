@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+from fastapi import HTTPException
 from sqlmodel import Session, SQLModel, create_engine, select
 
 import app.models  # noqa: F401
@@ -7,7 +9,144 @@ from app.models.review import ReviewItem
 from app.services.review_parser import parse_review_file
 
 
-def test_parse_review_file(tmp_path: Path):
+def test_parse_review_file_uses_machine_json(tmp_path: Path):
+    review = tmp_path / "REVIEW.md"
+    review.write_text(
+        """# REVIEW.md
+
+## 维护规则
+
+由 Claude-DeepSeek 维护。
+
+## 机器可读状态
+
+```json
+{
+  "schema_version": 1,
+  "current_task": "员工端手机号验证码登录 + Redis 验证码存储",
+  "review_status": "ARCHIVED",
+  "recheck_status": "PASSED",
+  "needs_codex_action": false,
+  "summary": "复审通过，当前无需要 Codex 处理的问题。",
+  "issue_counts": {
+    "HIGH": 0,
+    "MEDIUM": 0,
+    "LOW": 5
+  },
+  "issues": [
+    {
+      "id": "LOW-3",
+      "severity": "LOW",
+      "status": "WONT_FIX",
+      "title": "验证码 INFO 级别日志，正式环境有泄露风险",
+      "description": "后续接入真实短信服务时调整。"
+    }
+  ]
+}
+```
+
+## 当前审查任务
+
+这里的正文可以给人阅读。
+""",
+        encoding="utf-8",
+    )
+
+    result = parse_review_file(str(tmp_path))
+
+    assert result.current_task == "员工端手机号验证码登录 + Redis 验证码存储"
+    assert result.high_count == 0
+    assert result.medium_count == 0
+    assert result.low_count == 5
+    assert result.open_count == 0
+    assert result.recheck_status == "PASSED"
+    assert len(result.items) == 1
+    assert result.items[0].status == "WONT_FIX"
+
+
+def test_parse_review_file_counts_open_machine_json_items(tmp_path: Path):
+    review = tmp_path / "REVIEW.md"
+    review.write_text(
+        """# REVIEW.md
+
+## 机器可读状态
+
+```json
+{
+  "schema_version": 1,
+  "current_task": "登录模块",
+  "review_status": "FIX_REQUIRED",
+  "recheck_status": "PENDING",
+  "needs_codex_action": true,
+  "summary": "仍有问题需要处理。",
+  "issue_counts": {
+    "HIGH": 1,
+    "MEDIUM": 1,
+    "LOW": 1
+  },
+  "issues": [
+    {
+      "id": "HIGH-1",
+      "severity": "HIGH",
+      "status": "OPEN",
+      "title": "缺少鉴权"
+    },
+    {
+      "id": "MEDIUM-1",
+      "severity": "MEDIUM",
+      "status": "FIXED_PENDING_RECHECK",
+      "title": "异常路径测试待复审"
+    },
+    {
+      "id": "LOW-1",
+      "severity": "LOW",
+      "status": "CLOSED",
+      "title": "文案已关闭"
+    }
+  ]
+}
+```
+""",
+        encoding="utf-8",
+    )
+
+    result = parse_review_file(str(tmp_path))
+
+    assert result.high_count == 1
+    assert result.medium_count == 1
+    assert result.low_count == 1
+    assert result.open_count == 2
+    assert [item.status for item in result.items] == ["OPEN", "FIXED_PENDING_RECHECK", "CLOSED"]
+
+
+def test_parse_review_file_rejects_invalid_machine_json(tmp_path: Path):
+    review = tmp_path / "REVIEW.md"
+    review.write_text(
+        """# REVIEW.md
+
+## 机器可读状态
+
+```json
+{
+  "schema_version": 1,
+}
+```
+
+## 当前审查任务
+
+不要 fallback 到正文猜测。
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        parse_review_file(str(tmp_path))
+
+    assert exc_info.value.status_code == 422
+    assert "Invalid REVIEW.md machine JSON" in exc_info.value.detail
+
+
+def test_parse_review_file_falls_back_to_markdown_without_machine_json(tmp_path: Path):
     review = tmp_path / "REVIEW.md"
     review.write_text(
         """# REVIEW.md
@@ -38,90 +177,39 @@ UNKNOWN
     assert result.medium_count == 1
     assert result.low_count == 1
     assert result.open_count == 2
-    assert result.recheck_status == "UNKNOWN"
+    assert result.recheck_status == "PENDING"
 
 
-def test_parse_review_file_uses_current_chinese_sections(tmp_path: Path):
+def test_parse_review_file_replaces_existing_items(tmp_path: Path):
     review = tmp_path / "REVIEW.md"
     review.write_text(
         """# REVIEW.md
 
-## 当前审查任务
+## 机器可读状态
 
-本轮复审：员工端手机号验证码登录 + Redis 验证码存储（第二轮）。复审完成，已归档。结论：通过（0 高、0 中、5 低）。
-
-**验证状态：** `mvn test` 通过（158 passed）、`npm run build:h5` 通过。
-
-## 当前待处理问题
-
-本轮中等问题已全部修复，剩余 4 个低优先级问题标记为暂不处理（详见历史归档）。当前无需要 Codex 处理的问题。
-
-## 当前模块复审记录
-
-复审日期：2026-06-09 | 结论：2 中已修复，4 低暂不处理。
-
-## 历史审查归档
-
-- （中）#1 历史中等问题
-- （低）#2 历史低优先级问题
-""",
-        encoding="utf-8",
-    )
-
-    result = parse_review_file(str(tmp_path))
-
-    assert result.current_task.startswith("本轮复审")
-    assert result.high_count == 0
-    assert result.medium_count == 0
-    assert result.low_count == 0
-    assert result.open_count == 0
-    assert result.recheck_status == "PASSED"
-    assert result.items == []
-
-
-def test_parse_review_file_parses_current_chinese_items(tmp_path: Path):
-    review = tmp_path / "REVIEW.md"
-    review.write_text(
-        """# REVIEW.md
-
-## 当前审查任务
-
-本轮审查：登录模块。结论：不通过。
-
-## 当前待处理问题
-
-- [ ] （高）缺少鉴权
-- [ ] （中）缺少异常路径测试
-- （低）日志级别正式环境需确认，暂不处理
-
-## 历史审查归档
-
-- （高）历史问题不应进入当前列表
-""",
-        encoding="utf-8",
-    )
-
-    result = parse_review_file(str(tmp_path))
-
-    assert result.high_count == 1
-    assert result.medium_count == 1
-    assert result.low_count == 1
-    assert result.open_count == 2
-    assert result.recheck_status == "FAILED"
-    assert [item.status for item in result.items] == ["OPEN", "OPEN", "WONT_FIX"]
-
-
-def test_parse_review_replaces_existing_items(tmp_path: Path):
-    review = tmp_path / "REVIEW.md"
-    review.write_text(
-        """# REVIEW.md
-
-## Current Review Task
-Implement login module
-
-## Open Issues
-- [ ] High: Missing auth guard
-- [ ] Medium: Add test coverage
+```json
+{
+  "schema_version": 1,
+  "current_task": "登录模块",
+  "review_status": "FIX_REQUIRED",
+  "recheck_status": "PENDING",
+  "needs_codex_action": true,
+  "summary": "仍有问题需要处理。",
+  "issue_counts": {
+    "HIGH": 1,
+    "MEDIUM": 0,
+    "LOW": 0
+  },
+  "issues": [
+    {
+      "id": "HIGH-1",
+      "severity": "HIGH",
+      "status": "FIXED_PENDING_RECHECK",
+      "title": "缺少鉴权"
+    }
+  ]
+}
+```
 """,
         encoding="utf-8",
     )
@@ -133,4 +221,5 @@ Implement login module
         parse_review_file(str(tmp_path), session=session, task_id=1)
 
         items = session.exec(select(ReviewItem).where(ReviewItem.task_id == 1)).all()
-        assert len(items) == 2
+        assert len(items) == 1
+        assert items[0].status == "FIXED_PENDING_RECHECK"

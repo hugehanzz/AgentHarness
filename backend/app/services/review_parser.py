@@ -1,5 +1,7 @@
+import json
 import re
 from pathlib import Path
+from typing import Any
 
 from fastapi import HTTPException
 from sqlmodel import Session, delete
@@ -18,10 +20,16 @@ CURRENT_TASK_HEADINGS = ("current review task", "当前审查任务")
 CURRENT_ISSUE_HEADINGS = ("open issues", "当前待处理问题")
 RECHECK_HEADINGS = ("recheck conclusion", "当前模块复审记录")
 HISTORY_HEADINGS = ("历史审查归档", "history")
+MACHINE_STATE_HEADING = "机器可读状态"
 
 OPEN_MARKERS = ("[ ]", "待修复", "未解决", "TODO")
 RESOLVED_MARKERS = ("[x]", "[X]", "已修复", "关闭", "通过")
 WONT_FIX_MARKERS = ("暂不处理", "不处理", "可选优化")
+
+REVIEW_STATUSES = {"NOT_STARTED", "IN_REVIEW", "REVIEWED", "FIX_REQUIRED", "RECHECKING", "ARCHIVED"}
+RECHECK_STATUSES = {"NOT_REQUIRED", "PENDING", "PASSED", "FAILED"}
+ISSUE_STATUSES = {"OPEN", "FIXED_PENDING_RECHECK", "CLOSED", "WONT_FIX"}
+OPEN_ISSUE_STATUSES = {"OPEN", "FIXED_PENDING_RECHECK"}
 
 
 def parse_review_file(workspace_path: str, session: Session | None = None, task_id: int | None = None) -> ReviewParseResult:
@@ -33,33 +41,176 @@ def parse_review_file(workspace_path: str, session: Session | None = None, task_
         raise HTTPException(status_code=404, detail="REVIEW.md not found")
 
     content = review_path.read_text(encoding="utf-8")
+    parsed = _parse_machine_state(content, str(review_path)) or _parse_markdown_state(content, str(review_path))
+    _persist_items(parsed.items, session, task_id, str(review_path))
+    return parsed
+
+
+def _persist_items(
+    items: list[ParsedReviewItem],
+    session: Session | None,
+    task_id: int | None,
+    review_path: str,
+) -> None:
+    if not session or task_id is None:
+        return
+
+    session.exec(delete(ReviewItem).where(ReviewItem.task_id == task_id))
+    for item in items:
+        session.add(
+            ReviewItem(
+                task_id=task_id,
+                severity=ReviewSeverity(item.severity),
+                title=item.title[:300],
+                description=item.description,
+                status=ReviewItemStatus(item.status),
+                source_file=review_path,
+            )
+        )
+    session.commit()
+
+
+def _parse_machine_state(content: str, review_path: str) -> ReviewParseResult | None:
+    block = _extract_machine_json_block(content)
+    if block is None:
+        return None
+
+    try:
+        state = json.loads(block)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid REVIEW.md machine JSON: {exc.msg}") from exc
+
+    _validate_machine_state(state)
+    items = [
+        ParsedReviewItem(
+            severity=issue["severity"],
+            title=issue["title"],
+            description=issue.get("description"),
+            status=issue["status"],
+        )
+        for issue in state["issues"]
+    ]
+    counts = state["issue_counts"]
+    return ReviewParseResult(
+        review_path=review_path,
+        current_task=state["current_task"] or None,
+        high_count=counts["HIGH"],
+        medium_count=counts["MEDIUM"],
+        low_count=counts["LOW"],
+        open_count=sum(1 for item in items if item.status in OPEN_ISSUE_STATUSES),
+        recheck_status=state["recheck_status"],
+        items=items,
+    )
+
+
+def _extract_machine_json_block(content: str) -> str | None:
+    lines = content.splitlines()
+    section_lines = _section_after_heading(lines, (MACHINE_STATE_HEADING,))
+    if not section_lines:
+        return None
+
+    blocks: list[str] = []
+    collecting = False
+    current: list[str] = []
+    for line in section_lines:
+        stripped = line.strip()
+        if stripped == "```json":
+            if collecting:
+                raise HTTPException(status_code=422, detail="Nested REVIEW.md machine JSON block")
+            collecting = True
+            current = []
+            continue
+        if collecting and stripped == "```":
+            collecting = False
+            blocks.append("\n".join(current))
+            current = []
+            continue
+        if collecting:
+            current.append(line)
+
+    if collecting:
+        raise HTTPException(status_code=422, detail="Unclosed REVIEW.md machine JSON block")
+    if len(blocks) > 1:
+        raise HTTPException(status_code=422, detail="REVIEW.md machine state must contain exactly one JSON block")
+    return blocks[0] if blocks else None
+
+
+def _validate_machine_state(state: Any) -> None:
+    if not isinstance(state, dict):
+        raise HTTPException(status_code=422, detail="REVIEW.md machine JSON must be an object")
+
+    required = {
+        "schema_version",
+        "current_task",
+        "review_status",
+        "recheck_status",
+        "needs_codex_action",
+        "summary",
+        "issue_counts",
+        "issues",
+    }
+    missing = sorted(required - set(state))
+    if missing:
+        raise HTTPException(status_code=422, detail=f"REVIEW.md machine JSON missing fields: {', '.join(missing)}")
+
+    if state["schema_version"] != 1:
+        raise HTTPException(status_code=422, detail="Unsupported REVIEW.md machine JSON schema_version")
+    if not isinstance(state["current_task"], str):
+        raise HTTPException(status_code=422, detail="current_task must be a string")
+    if state["review_status"] not in REVIEW_STATUSES:
+        raise HTTPException(status_code=422, detail="review_status has an invalid value")
+    if state["recheck_status"] not in RECHECK_STATUSES:
+        raise HTTPException(status_code=422, detail="recheck_status has an invalid value")
+    if not isinstance(state["needs_codex_action"], bool):
+        raise HTTPException(status_code=422, detail="needs_codex_action must be a boolean")
+    if not isinstance(state["summary"], str):
+        raise HTTPException(status_code=422, detail="summary must be a string")
+
+    counts = state["issue_counts"]
+    if not isinstance(counts, dict):
+        raise HTTPException(status_code=422, detail="issue_counts must be an object")
+    for severity in ("HIGH", "MEDIUM", "LOW"):
+        if not isinstance(counts.get(severity), int):
+            raise HTTPException(status_code=422, detail=f"issue_counts.{severity} must be an integer")
+
+    issues = state["issues"]
+    if not isinstance(issues, list):
+        raise HTTPException(status_code=422, detail="issues must be an array")
+    for index, issue in enumerate(issues):
+        _validate_machine_issue(issue, index)
+
+
+def _validate_machine_issue(issue: Any, index: int) -> None:
+    if not isinstance(issue, dict):
+        raise HTTPException(status_code=422, detail=f"issues[{index}] must be an object")
+    required = {"id", "severity", "status", "title"}
+    missing = sorted(required - set(issue))
+    if missing:
+        raise HTTPException(status_code=422, detail=f"issues[{index}] missing fields: {', '.join(missing)}")
+    if not isinstance(issue["id"], str):
+        raise HTTPException(status_code=422, detail=f"issues[{index}].id must be a string")
+    if issue["severity"] not in {"HIGH", "MEDIUM", "LOW"}:
+        raise HTTPException(status_code=422, detail=f"issues[{index}].severity has an invalid value")
+    if issue["status"] not in ISSUE_STATUSES:
+        raise HTTPException(status_code=422, detail=f"issues[{index}].status has an invalid value")
+    if not isinstance(issue["title"], str) or not issue["title"].strip():
+        raise HTTPException(status_code=422, detail=f"issues[{index}].title must be a non-empty string")
+    if "description" in issue and not isinstance(issue["description"], str):
+        raise HTTPException(status_code=422, detail=f"issues[{index}].description must be a string")
+
+
+def _parse_markdown_state(content: str, review_path: str) -> ReviewParseResult:
     lines = content.splitlines()
     current_task = _extract_current_task(lines)
     items = _extract_items(lines)
     recheck_status = _extract_recheck_status(lines)
-
-    if session and task_id is not None:
-        session.exec(delete(ReviewItem).where(ReviewItem.task_id == task_id))
-        for item in items:
-            session.add(
-                ReviewItem(
-                    task_id=task_id,
-                    severity=ReviewSeverity(item.severity),
-                    title=item.title[:300],
-                    description=item.description,
-                    status=ReviewItemStatus(item.status),
-                    source_file=str(review_path),
-                )
-            )
-        session.commit()
-
     return ReviewParseResult(
-        review_path=str(review_path),
+        review_path=review_path,
         current_task=current_task,
         high_count=sum(1 for item in items if item.severity == "HIGH"),
         medium_count=sum(1 for item in items if item.severity == "MEDIUM"),
         low_count=sum(1 for item in items if item.severity == "LOW"),
-        open_count=sum(1 for item in items if item.status == "OPEN"),
+        open_count=sum(1 for item in items if item.status in OPEN_ISSUE_STATUSES),
         recheck_status=recheck_status,
         items=items,
     )
@@ -109,7 +260,7 @@ def _detect_status(text: str) -> str:
     if any(marker in text for marker in OPEN_MARKERS):
         return "OPEN"
     if any(marker in text for marker in RESOLVED_MARKERS):
-        return "RESOLVED"
+        return "CLOSED"
     return "OPEN"
 
 
@@ -122,12 +273,12 @@ def _extract_recheck_status(lines: list[str]) -> str:
         line for line in candidate_lines if re.search(r"结论|conclusion|recheck", line, re.IGNORECASE)
     )
     if not conclusion_text:
-        return "UNKNOWN"
+        return "PENDING"
     if re.search(r"不通过|未通过|failed|failure", conclusion_text, re.IGNORECASE):
         return "FAILED"
     if re.search(r"通过|passed|pass", conclusion_text, re.IGNORECASE):
         return "PASSED"
-    return "UNKNOWN"
+    return "PENDING"
 
 
 def _section_after_heading(lines: list[str], headings: tuple[str, ...]) -> list[str]:
@@ -138,7 +289,7 @@ def _section_after_heading(lines: list[str], headings: tuple[str, ...]) -> list[
         if line.lstrip().startswith("#"):
             if collecting:
                 break
-            if any(heading in normalized for heading in headings):
+            if any(heading.lower() in normalized for heading in headings):
                 collecting = True
             continue
         if collecting:
@@ -150,7 +301,7 @@ def _without_history(lines: list[str]) -> list[str]:
     result: list[str] = []
     for line in lines:
         normalized = line.strip().strip("# ").lower()
-        if line.lstrip().startswith("#") and any(heading in normalized for heading in HISTORY_HEADINGS):
+        if line.lstrip().startswith("#") and any(heading.lower() in normalized for heading in HISTORY_HEADINGS):
             break
         result.append(line)
     return result

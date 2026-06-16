@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Check, Refresh, Right } from '@element-plus/icons-vue'
+import { ArrowLeft, Check, Close, Edit, Refresh, Right } from '@element-plus/icons-vue'
 import AcceptancePanel from '../components/AcceptancePanel.vue'
 import CommandPanel from '../components/CommandPanel.vue'
 import PromptPanel from '../components/PromptPanel.vue'
@@ -14,6 +14,9 @@ const route = useRoute()
 const router = useRouter()
 const store = useTasksStore()
 const taskId = Number(route.params.id)
+const requirementEditing = ref(false)
+const requirementSaving = ref(false)
+const requirementDraft = ref('')
 
 const statuses: TaskStatus[] = [
   'REQUIREMENT_DRAFT',
@@ -76,6 +79,10 @@ const nextStatuses = computed(() => {
   return nextStatusMap[store.selectedTask.status] || []
 })
 
+const requirementChanged = computed(() => {
+  return requirementDraft.value.trim() !== (store.selectedTask?.description || '').trim()
+})
+
 function stageState(stageStatus: TaskStatus) {
   const stageIndex = statuses.indexOf(stageStatus)
   if (!store.selectedTask) return ''
@@ -95,6 +102,37 @@ async function loadTask() {
 async function transition(toStatus: TaskStatus) {
   await store.transitionTask(taskId, toStatus, `Human Supervisor moved task to ${toStatus}`)
 }
+
+function startRequirementEdit() {
+  requirementDraft.value = store.selectedTask?.description || ''
+  requirementEditing.value = true
+}
+
+function cancelRequirementEdit() {
+  requirementDraft.value = store.selectedTask?.description || ''
+  requirementEditing.value = false
+}
+
+async function saveRequirement() {
+  if (!requirementChanged.value || !requirementDraft.value.trim()) return
+  requirementSaving.value = true
+  try {
+    await store.updateRequirement(taskId, requirementDraft.value)
+    requirementEditing.value = false
+  } finally {
+    requirementSaving.value = false
+  }
+}
+
+watch(
+  () => store.selectedTask?.description,
+  (description) => {
+    if (!requirementEditing.value) {
+      requirementDraft.value = description || ''
+    }
+  },
+  { immediate: true },
+)
 
 onMounted(() => {
   loadTask()
@@ -203,9 +241,37 @@ onMounted(() => {
                 <h2 class="panel-title">Requirement</h2>
                 <div class="panel-kicker">Source material for prompt generation</div>
               </div>
+              <el-button
+                v-if="!requirementEditing"
+                class="icon-button"
+                :icon="Edit"
+                @click="startRequirementEdit"
+              >
+                Edit
+              </el-button>
             </div>
-            <p class="requirement-text">{{ store.selectedTask.description }}</p>
-            <div class="path-box">{{ store.selectedTask.workspace_path || 'No workspace path' }}</div>
+            <div v-if="!requirementEditing" class="requirement-text">{{ store.selectedTask.description }}</div>
+            <div v-else class="requirement-editor">
+              <el-input
+                v-model="requirementDraft"
+                type="textarea"
+                :rows="5"
+                resize="vertical"
+                placeholder="Describe the requirement, goals, constraints, risks, and acceptance criteria."
+              />
+              <div class="copy-row">
+                <el-button :icon="Close" @click="cancelRequirementEdit">Cancel</el-button>
+                <el-button
+                  type="primary"
+                  :icon="Check"
+                  :loading="requirementSaving"
+                  :disabled="!requirementChanged || !requirementDraft.trim()"
+                  @click="saveRequirement"
+                >
+                  Save
+                </el-button>
+              </div>
+            </div>
           </div>
           <WorkerStatus />
           <AcceptancePanel :task-id="taskId" />

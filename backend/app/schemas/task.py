@@ -33,6 +33,11 @@ class TaskTransitionRequest(BaseModel):
     created_by: str = "human_supervisor"
 
 
+class TaskRequirementUpdate(BaseModel):
+    description: str
+    created_by: str = "human_supervisor"
+
+
 class TaskEventRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

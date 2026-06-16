@@ -35,9 +35,7 @@ async function copyPrompt() {
     <div class="panel-header">
       <div>
         <h2 class="panel-title">Prompt Builder</h2>
-        <div class="panel-kicker">Build local template prompts for Codex and Claude-DeepSeek</div>
       </div>
-      <span class="local-template-badge">Local Template · No Model API</span>
     </div>
     <div class="copy-row">
       <el-select v-model="selectedType" style="width: 240px">

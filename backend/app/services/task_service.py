@@ -61,3 +61,26 @@ def transition_task(session: Session, task_id: int, to_status: TaskStatus, messa
     session.commit()
     session.refresh(task)
     return task
+
+
+def update_task_requirement(session: Session, task_id: int, description: str, created_by: str) -> Task:
+    task = get_task_or_404(session, task_id)
+    next_description = description.strip()
+    if not next_description:
+        raise HTTPException(status_code=400, detail="description must not be empty")
+    if task.description == next_description:
+        return task
+
+    task.description = next_description
+    task.updated_at = app_now()
+    event = TaskEvent(
+        task_id=task.id,
+        event_type="REQUIREMENT_UPDATED",
+        message="Requirement description updated",
+        created_by=created_by,
+    )
+    session.add(task)
+    session.add(event)
+    session.commit()
+    session.refresh(task)
+    return task

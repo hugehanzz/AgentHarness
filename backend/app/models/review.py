@@ -15,7 +15,8 @@ class ReviewSeverity(StrEnum):
 
 class ReviewItemStatus(StrEnum):
     OPEN = "OPEN"
-    RESOLVED = "RESOLVED"
+    FIXED_PENDING_RECHECK = "FIXED_PENDING_RECHECK"
+    CLOSED = "CLOSED"
     WONT_FIX = "WONT_FIX"
 
 
