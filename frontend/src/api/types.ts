@@ -50,3 +50,24 @@ export interface Worker {
   current_task_id: number | null
   is_online: boolean
 }
+
+export interface AgentRun {
+  id: number
+  task_id: number | null
+  worker_id: number | null
+  run_type: string
+  provider_type: string
+  external_thread_id: string | null
+  external_turn_id: string | null
+  command_display: string | null
+  cwd: string | null
+  exit_code: number | null
+  status: 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'TIMED_OUT'
+  input_payload: string | null
+  output_payload: string | null
+  stderr: string | null
+  error_message: string | null
+  started_at: string | null
+  finished_at: string | null
+  created_at: string
+}

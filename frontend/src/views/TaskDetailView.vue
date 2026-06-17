@@ -2,13 +2,16 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, Check, Close, Edit, Refresh, Right } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import AcceptancePanel from '../components/AcceptancePanel.vue'
+import AgentRunsPanel from '../components/AgentRunsPanel.vue'
 import CommandPanel from '../components/CommandPanel.vue'
 import PromptPanel from '../components/PromptPanel.vue'
 import ReviewPanel from '../components/ReviewPanel.vue'
 import WorkerStatus from '../components/WorkerStatus.vue'
+import { api } from '../api/client'
 import { useTasksStore } from '../stores/tasks'
-import type { TaskStatus } from '../api/types'
+import type { AgentRun, TaskStatus } from '../api/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -17,6 +20,8 @@ const taskId = Number(route.params.id)
 const requirementEditing = ref(false)
 const requirementSaving = ref(false)
 const requirementDraft = ref('')
+const flowActionRunning = ref<TaskStatus | null>(null)
+const agentRunsRefreshKey = ref(0)
 
 const statuses: TaskStatus[] = [
   'REQUIREMENT_DRAFT',
@@ -127,7 +132,18 @@ const eventTypeLabels: Record<string, string> = {
   TASK_CREATED: '任务创建',
   TASK_TRANSITIONED: '流程流转',
   REQUIREMENT_UPDATED: '需求更新',
+  AGENT_RUN_COMPLETED: 'Agent Run',
 }
+
+const agentRunByTransition: Partial<Record<TaskStatus, string>> = {
+  PLAN_REQUESTED: 'codex_plan',
+  IMPLEMENTING: 'codex_implement',
+  REVIEW_REQUESTED: 'claude_review',
+  FIXING: 'codex_fix',
+  RECHECK_REQUESTED: 'claude_recheck',
+}
+
+const pendingCodexAppServerRuns = new Set(['codex_plan', 'codex_implement', 'codex_fix'])
 
 function actionLabel(status: TaskStatus) {
   return actionLabels[status] || status
@@ -170,8 +186,30 @@ async function loadTask() {
   }
 }
 
+async function runAgentForTransition(toStatus: TaskStatus) {
+  const runType = agentRunByTransition[toStatus]
+  if (!runType) return
+
+  if (pendingCodexAppServerRuns.has(runType)) {
+    ElMessage.info('Codex App Server adapter will handle this step after the next integration.')
+    return
+  }
+
+  const { data } = await api.post<AgentRun>(`/tasks/${taskId}/agent-runs`, { run_type: runType })
+  agentRunsRefreshKey.value += 1
+  ElMessage.success(`${runType} finished with ${data.status}`)
+}
+
 async function transition(toStatus: TaskStatus) {
-  await store.transitionTask(taskId, toStatus, `Human Supervisor: ${actionLabel(toStatus)}`)
+  flowActionRunning.value = toStatus
+  try {
+    await store.transitionTask(taskId, toStatus, `Human Supervisor: ${actionLabel(toStatus)}`)
+    await runAgentForTransition(toStatus)
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail || error?.message || 'Flow action failed')
+  } finally {
+    flowActionRunning.value = null
+  }
 }
 
 function startRequirementEdit() {
@@ -298,6 +336,8 @@ onMounted(() => {
             :key="status"
             type="primary"
             :icon="status === 'ACCEPTANCE_PASSED' ? Check : Right"
+            :loading="flowActionRunning === status"
+            :disabled="Boolean(flowActionRunning)"
             @click="transition(status)"
           >
             {{ actionLabel(status) }}
@@ -346,6 +386,7 @@ onMounted(() => {
             </div>
           </div>
           <WorkerStatus />
+          <AgentRunsPanel :task-id="taskId" :refresh-key="agentRunsRefreshKey" />
           <AcceptancePanel :task-id="taskId" />
         </div>
 

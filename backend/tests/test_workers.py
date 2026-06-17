@@ -26,13 +26,14 @@ def test_ensure_workers_creates_collaboration_agents():
             WorkerRole.REVIEWER,
         }
         assert {worker.worker_type for worker in workers} == {
-            "external_human_loop",
+            "codex_app_server",
             "external_llm_planned",
             "human_gate",
+            "local_cli_agent",
         }
 
 
-def test_external_agents_do_not_receive_fake_heartbeat():
+def test_human_and_external_agents_do_not_receive_fake_heartbeat():
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
 
@@ -41,4 +42,8 @@ def test_external_agents_do_not_receive_fake_heartbeat():
         heartbeat_workers(session)
         workers = session.exec(select(AgentWorker)).all()
 
-        assert all(worker.last_heartbeat_at is None for worker in workers)
+        skipped_workers = [worker for worker in workers if worker.worker_type != "local_cli_agent"]
+        local_cli_workers = [worker for worker in workers if worker.worker_type == "local_cli_agent"]
+
+        assert all(worker.last_heartbeat_at is None for worker in skipped_workers)
+        assert all(worker.last_heartbeat_at is not None for worker in local_cli_workers)

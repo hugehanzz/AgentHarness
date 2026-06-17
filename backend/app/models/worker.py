@@ -28,6 +28,7 @@ class RunStatus(StrEnum):
     RUNNING = "RUNNING"
     SUCCEEDED = "SUCCEEDED"
     FAILED = "FAILED"
+    TIMED_OUT = "TIMED_OUT"
 
 
 class AgentWorker(SQLModel, table=True):
@@ -46,9 +47,17 @@ class AgentRun(SQLModel, table=True):
     task_id: int | None = Field(default=None, index=True, foreign_key="task.id")
     worker_id: int | None = Field(default=None, index=True, foreign_key="agentworker.id")
     run_type: str = Field(index=True, max_length=100)
+    provider_type: str = Field(default="local_cli", index=True, max_length=80)
+    external_thread_id: str | None = Field(default=None, index=True, max_length=120)
+    external_turn_id: str | None = Field(default=None, index=True, max_length=120)
+    command_display: str | None = Field(default=None, max_length=500)
+    cwd: str | None = Field(default=None, max_length=1000)
+    exit_code: int | None = None
     status: RunStatus = Field(default=RunStatus.QUEUED, index=True)
     input_payload: str | None = None
     output_payload: str | None = None
+    stderr: str | None = None
     error_message: str | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
+    created_at: datetime = Field(default_factory=app_now)

@@ -8,6 +8,8 @@ class Settings(BaseSettings):
     app_env: str = "development"
     database_url: str = "mysql+pymysql://agentharness:agentharness@localhost:3306/agentharness"
     command_timeout_seconds: int = 30
+    agent_timeout_seconds: int = 600
+    agent_claude_command: str | None = None
     app_timezone: str = "Asia/Shanghai"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")

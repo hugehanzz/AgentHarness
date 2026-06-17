@@ -17,8 +17,8 @@ class WorkerAgent(ABC):
 
 WORKER_DEFINITIONS = [
     ("Orchestrator", WorkerRole.ORCHESTRATOR, "external_llm_planned"),
-    ("Codex", WorkerRole.DEVELOPER, "external_human_loop"),
-    ("Claude-DeepSeek", WorkerRole.REVIEWER, "external_human_loop"),
+    ("Codex", WorkerRole.DEVELOPER, "codex_app_server"),
+    ("Claude-DeepSeek", WorkerRole.REVIEWER, "local_cli_agent"),
     ("Human Supervisor", WorkerRole.ACCEPTANCE, "human_gate"),
 ]
 
@@ -39,7 +39,7 @@ def heartbeat_workers(session: Session) -> None:
     now = app_now()
     workers = session.exec(select(AgentWorker)).all()
     for worker in workers:
-        if worker.worker_type.startswith("external") or worker.worker_type == "human_gate":
+        if worker.worker_type not in {"internal", "local_cli_agent"}:
             continue
         worker.last_heartbeat_at = now
         if worker.status == WorkerStatus.OFFLINE:
