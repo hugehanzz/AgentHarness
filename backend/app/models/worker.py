@@ -1,6 +1,7 @@
 from datetime import datetime
 from enum import StrEnum
 
+from sqlalchemy import Column, Text
 from sqlmodel import Field, SQLModel
 
 from app.models.common import app_now
@@ -54,10 +55,10 @@ class AgentRun(SQLModel, table=True):
     cwd: str | None = Field(default=None, max_length=1000)
     exit_code: int | None = None
     status: RunStatus = Field(default=RunStatus.QUEUED, index=True)
-    input_payload: str | None = None
-    output_payload: str | None = None
-    stderr: str | None = None
-    error_message: str | None = None
+    input_payload: str | None = Field(default=None, sa_column=Column(Text))
+    output_payload: str | None = Field(default=None, sa_column=Column(Text))
+    stderr: str | None = Field(default=None, sa_column=Column(Text))
+    error_message: str | None = Field(default=None, sa_column=Column(Text))
     started_at: datetime | None = None
     finished_at: datetime | None = None
     created_at: datetime = Field(default_factory=app_now)

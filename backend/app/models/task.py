@@ -1,6 +1,7 @@
 from datetime import datetime
 from enum import StrEnum
 
+from sqlalchemy import Column, Text
 from sqlmodel import Field, SQLModel
 
 from app.core.state_machine import TaskStatus
@@ -16,7 +17,7 @@ class TaskPriority(StrEnum):
 class Task(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     title: str = Field(index=True, max_length=200)
-    description: str
+    description: str = Field(sa_column=Column(Text))
     workspace_path: str | None = Field(default=None, max_length=1000)
     status: TaskStatus = Field(default=TaskStatus.REQUIREMENT_DRAFT, index=True)
     priority: TaskPriority = Field(default=TaskPriority.MEDIUM)
@@ -31,6 +32,6 @@ class TaskEvent(SQLModel, table=True):
     event_type: str = Field(index=True, max_length=100)
     from_status: TaskStatus | None = None
     to_status: TaskStatus | None = None
-    message: str | None = None
+    message: str | None = Field(default=None, sa_column=Column(Text))
     created_by: str = Field(default="system", max_length=100)
     created_at: datetime = Field(default_factory=app_now)

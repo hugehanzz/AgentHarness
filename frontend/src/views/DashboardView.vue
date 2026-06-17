@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { FolderOpened, List, Plus, Refresh, Share, UserFilled } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import FolderPickerDialog from '../components/FolderPickerDialog.vue'
 import WorkerStatus from '../components/WorkerStatus.vue'
 import { useTasksStore } from '../stores/tasks'
@@ -10,6 +11,9 @@ import type { TaskStatus } from '../api/types'
 const store = useTasksStore()
 const router = useRouter()
 const folderPickerVisible = ref(false)
+const creatingTask = ref(false)
+const taskPage = ref(1)
+const taskPageSize = 8
 const form = reactive({
   title: '',
   description: '',
@@ -18,14 +22,23 @@ const form = reactive({
 
 async function createTask() {
   if (!form.title.trim() || !form.description.trim()) return
-  await store.createTask({
-    title: form.title,
-    description: form.description,
-    workspace_path: form.workspace_path || undefined,
-  })
-  form.title = ''
-  form.description = ''
-  form.workspace_path = ''
+  creatingTask.value = true
+  try {
+    await store.createTask({
+      title: form.title,
+      description: form.description,
+      workspace_path: form.workspace_path || undefined,
+    })
+    ElMessage.success('Workflow created')
+    form.title = ''
+    form.description = ''
+    form.workspace_path = ''
+    taskPage.value = 1
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail || error?.message || 'Failed to create workflow')
+  } finally {
+    creatingTask.value = false
+  }
 }
 
 const runningTasks = computed(() =>
@@ -39,6 +52,11 @@ const gateTasks = computed(() =>
 const onlineWorkers = computed(() =>
   store.workers.filter((worker) => worker.is_online || worker.name === 'Human Supervisor').length,
 )
+
+const pagedTasks = computed(() => {
+  const start = (taskPage.value - 1) * taskPageSize
+  return store.tasks.slice(start, start + taskPageSize)
+})
 
 const flowStageLabels: Record<TaskStatus, string> = {
   REQUIREMENT_DRAFT: 'Requirement',
@@ -123,7 +141,15 @@ onMounted(() => {
             <el-form-item label="Description">
               <el-input v-model="form.description" type="textarea" :rows="7" placeholder="请描述需求背景、目标、约束、风险点和验收标准。" />
             </el-form-item>
-            <el-button class="primary-action" type="primary" :icon="Plus" @click="createTask">Create Workflow</el-button>
+            <el-button
+              class="primary-action"
+              type="primary"
+              :icon="Plus"
+              :loading="creatingTask"
+              @click="createTask"
+            >
+              Create Workflow
+            </el-button>
           </el-form>
         </div>
         <WorkerStatus />
@@ -166,27 +192,39 @@ onMounted(() => {
           </div>
         </div>
 
-        <el-table class="workflow-table" :data="store.tasks" height="100%" @row-click="(row: any) => router.push(`/tasks/${row.id}`)">
-          <el-table-column prop="id" label="ID" width="80" />
-          <el-table-column label="Task" min-width="260">
-            <template #default="{ row }">
-              <div class="task-title-cell">
-                <strong>{{ row.title }}</strong>
-                <span>{{ row.workspace_path || 'No workspace path' }}</span>
-              </div>
-            </template>
-          </el-table-column>
-          <el-table-column label="Status" min-width="190">
-            <template #default="{ row }">
-              <span :class="['status-pill', flowStageClass(row.status)]">{{ flowStageLabel(row.status) }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="Updated" min-width="180">
-            <template #default="{ row }">
-              {{ formatTimestamp(row.updated_at) }}
-            </template>
-          </el-table-column>
-        </el-table>
+        <div class="workflow-table-wrap">
+          <el-table class="workflow-table" :data="pagedTasks" @row-click="(row: any) => router.push(`/tasks/${row.id}`)">
+            <el-table-column prop="id" label="ID" width="80" />
+            <el-table-column label="Task" min-width="260">
+              <template #default="{ row }">
+                <div class="task-title-cell">
+                  <strong>{{ row.title }}</strong>
+                  <span>{{ row.workspace_path || 'No workspace path' }}</span>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="Status" min-width="190">
+              <template #default="{ row }">
+                <span :class="['status-pill', flowStageClass(row.status)]">{{ flowStageLabel(row.status) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="Updated" min-width="180">
+              <template #default="{ row }">
+                {{ formatTimestamp(row.updated_at) }}
+              </template>
+            </el-table-column>
+          </el-table>
+
+          <div class="workflow-pagination">
+            <el-pagination
+              v-model:current-page="taskPage"
+              background
+              layout="prev, pager, next"
+              :page-size="taskPageSize"
+              :total="store.tasks.length"
+            />
+          </div>
+        </div>
       </section>
     </main>
     <FolderPickerDialog

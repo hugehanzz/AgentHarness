@@ -21,6 +21,7 @@ const requirementEditing = ref(false)
 const requirementSaving = ref(false)
 const requirementDraft = ref('')
 const flowActionRunning = ref<TaskStatus | null>(null)
+const currentAgentRunning = ref(false)
 const agentRunsRefreshKey = ref(0)
 
 const statuses: TaskStatus[] = [
@@ -143,7 +144,26 @@ const agentRunByTransition: Partial<Record<TaskStatus, string>> = {
   RECHECK_REQUESTED: 'claude_recheck',
 }
 
-const pendingCodexAppServerRuns = new Set(['codex_plan', 'codex_implement', 'codex_fix'])
+const agentRunByCurrentStatus: Partial<Record<TaskStatus, string>> = {
+  PLAN_REQUESTED: 'codex_plan',
+  IMPLEMENTING: 'codex_implement',
+  REVIEW_REQUESTED: 'claude_review',
+  FIXING: 'codex_fix',
+  RECHECK_REQUESTED: 'claude_recheck',
+}
+
+const agentRunLabels: Record<string, string> = {
+  codex_plan: '运行 Codex Plan',
+  codex_implement: '运行 Codex Implement',
+  claude_review: '运行 Claude Review',
+  codex_fix: '运行 Codex Fix',
+  claude_recheck: '运行 Claude Recheck',
+}
+
+const currentAgentRunType = computed(() => {
+  if (!store.selectedTask) return null
+  return agentRunByCurrentStatus[store.selectedTask.status] || null
+})
 
 function actionLabel(status: TaskStatus) {
   return actionLabels[status] || status
@@ -186,18 +206,29 @@ async function loadTask() {
   }
 }
 
+async function runAgentByType(runType: string) {
+  const { data } = await api.post<AgentRun>(`/tasks/${taskId}/agent-runs`, { run_type: runType })
+  agentRunsRefreshKey.value += 1
+  ElMessage.success(`${runType} finished with ${data.status}`)
+}
+
 async function runAgentForTransition(toStatus: TaskStatus) {
   const runType = agentRunByTransition[toStatus]
   if (!runType) return
 
-  if (pendingCodexAppServerRuns.has(runType)) {
-    ElMessage.info('Codex App Server adapter will handle this step after the next integration.')
-    return
-  }
+  await runAgentByType(runType)
+}
 
-  const { data } = await api.post<AgentRun>(`/tasks/${taskId}/agent-runs`, { run_type: runType })
-  agentRunsRefreshKey.value += 1
-  ElMessage.success(`${runType} finished with ${data.status}`)
+async function runCurrentAgent() {
+  if (!currentAgentRunType.value) return
+  currentAgentRunning.value = true
+  try {
+    await runAgentByType(currentAgentRunType.value)
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail || error?.message || 'Agent run failed')
+  } finally {
+    currentAgentRunning.value = false
+  }
 }
 
 async function transition(toStatus: TaskStatus) {
@@ -342,6 +373,15 @@ onMounted(() => {
           >
             {{ actionLabel(status) }}
           </el-button>
+          <el-button
+            v-if="currentAgentRunType"
+            :icon="Right"
+            :loading="currentAgentRunning"
+            :disabled="Boolean(flowActionRunning) || currentAgentRunning"
+            @click="runCurrentAgent"
+          >
+            {{ agentRunLabels[currentAgentRunType] || currentAgentRunType }}
+          </el-button>
         </div>
       </section>
 
@@ -385,8 +425,8 @@ onMounted(() => {
               </div>
             </div>
           </div>
-          <WorkerStatus />
           <AgentRunsPanel :task-id="taskId" :refresh-key="agentRunsRefreshKey" />
+          <WorkerStatus />
           <AcceptancePanel :task-id="taskId" />
         </div>
 

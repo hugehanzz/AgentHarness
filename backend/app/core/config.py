@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     database_url: str = "mysql+pymysql://agentharness:agentharness@localhost:3306/agentharness"
     command_timeout_seconds: int = 30
     agent_timeout_seconds: int = 600
+    codex_app_server_command: str = "codex app-server"
     agent_claude_command: str | None = None
     app_timezone: str = "Asia/Shanghai"
 
