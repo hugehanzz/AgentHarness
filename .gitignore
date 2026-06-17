@@ -10,6 +10,7 @@ venv/
 # Backend
 backend/.env
 backend/*.db
+backend/tmp/
 
 # Frontend
 frontend/node_modules/

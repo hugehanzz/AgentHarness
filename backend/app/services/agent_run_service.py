@@ -15,7 +15,7 @@ from app.core.config import get_settings
 from app.models.common import app_now
 from app.models.prompt import PromptType
 from app.models.task import TaskEvent
-from app.models.worker import AgentRun, AgentWorker, RunStatus
+from app.models.worker import AgentRun, AgentSession, AgentSessionStatus, AgentWorker, RunStatus
 from app.prompts.templates import build_prompt
 from app.services.task_service import get_task_or_404
 
@@ -39,6 +39,10 @@ LOCAL_CLI_RUN_DEFINITIONS: dict[str, dict[str, str]] = {
         "command_setting": "agent_claude_command",
     },
 }
+
+
+CLAUDE_PROVIDER_TYPE = "claude_cli"
+CLAUDE_SESSION_TASK_LIMIT = 5
 
 
 def split_command(command_value: str) -> list[str]:
@@ -68,6 +72,69 @@ def get_latest_codex_thread_id(session: Session, task_id: int) -> str | None:
         .order_by(AgentRun.created_at.desc())
     ).first()
     return latest_run.external_thread_id if latest_run else None
+
+
+def get_latest_claude_task_session(session: Session, task_id: int) -> AgentSession | None:
+    latest_run = session.exec(
+        select(AgentRun)
+        .where(
+            AgentRun.task_id == task_id,
+            AgentRun.provider_type == CLAUDE_PROVIDER_TYPE,
+            AgentRun.agent_session_id.is_not(None),
+        )
+        .order_by(AgentRun.created_at.desc())
+    ).first()
+    if not latest_run or not latest_run.agent_session_id:
+        return None
+    return session.get(AgentSession, latest_run.agent_session_id)
+
+
+def get_or_create_claude_session(session: Session, task_id: int, workspace_path: str) -> AgentSession:
+    task_session = get_latest_claude_task_session(session, task_id)
+    if task_session:
+        return task_session
+
+    active_session = session.exec(
+        select(AgentSession)
+        .where(
+            AgentSession.provider_type == CLAUDE_PROVIDER_TYPE,
+            AgentSession.workspace_path == workspace_path,
+            AgentSession.status == AgentSessionStatus.ACTIVE,
+        )
+        .order_by(AgentSession.created_at.desc())
+    ).first()
+    if active_session and active_session.task_count < CLAUDE_SESSION_TASK_LIMIT:
+        return active_session
+
+    if active_session:
+        active_session.status = AgentSessionStatus.ROTATED
+        active_session.rotated_at = app_now()
+        active_session.updated_at = app_now()
+        session.add(active_session)
+
+    new_session = AgentSession(
+        provider_type=CLAUDE_PROVIDER_TYPE,
+        workspace_path=workspace_path,
+        status=AgentSessionStatus.ACTIVE,
+    )
+    session.add(new_session)
+    session.commit()
+    session.refresh(new_session)
+    return new_session
+
+
+def should_count_task_for_session(session: Session, agent_session_id: int, task_id: int) -> bool:
+    existing_run = session.exec(
+        select(AgentRun)
+        .where(
+            AgentRun.agent_session_id == agent_session_id,
+            AgentRun.task_id == task_id,
+            AgentRun.provider_type == CLAUDE_PROVIDER_TYPE,
+            AgentRun.status == RunStatus.SUCCEEDED,
+        )
+        .order_by(AgentRun.created_at.desc())
+    ).first()
+    return existing_run is None
 
 
 def list_agent_runs(session: Session, task_id: int) -> list[AgentRun]:
@@ -189,16 +256,22 @@ async def run_local_agent(session: Session, task_id: int, run_type: str) -> Agen
     worker = session.exec(select(AgentWorker).where(AgentWorker.name == definition["worker_name"])).first()
     prompt_type = PromptType(definition["prompt_type"])
     prompt = build_prompt(task, prompt_type)
+    claude_session = get_or_create_claude_session(session, task.id, str(cwd))
+    resume_session_id = claude_session.external_session_id
+    task_should_be_counted = should_count_task_for_session(session, claude_session.id, task.id)
+    run_command = build_claude_cli_command(command, resume_session_id)
     now = app_now()
     record = AgentRun(
         task_id=task.id,
         worker_id=worker.id if worker else None,
+        agent_session_id=claude_session.id,
         run_type=run_type,
-        provider_type="local_cli",
-        command_display=" ".join(command),
+        provider_type=CLAUDE_PROVIDER_TYPE,
+        command_display=display_claude_command(command, bool(resume_session_id)),
         cwd=str(cwd),
         status=RunStatus.RUNNING,
         input_payload=prompt,
+        external_thread_id=resume_session_id,
         started_at=now,
     )
     session.add(record)
@@ -206,24 +279,46 @@ async def run_local_agent(session: Session, task_id: int, run_type: str) -> Agen
     session.refresh(record)
 
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *command,
+        completed = await asyncio.to_thread(
+            subprocess.run,
+            run_command,
             cwd=str(cwd),
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout_bytes, stderr_bytes = await asyncio.wait_for(
-            proc.communicate(prompt.encode("utf-8")),
+            input=prompt,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             timeout=settings.agent_timeout_seconds,
+            check=False,
         )
-        record.exit_code = proc.returncode
-        record.output_payload = stdout_bytes.decode("utf-8", errors="replace")
-        record.stderr = stderr_bytes.decode("utf-8", errors="replace")
-        record.status = RunStatus.SUCCEEDED if proc.returncode == 0 else RunStatus.FAILED
-    except TimeoutError:
+        parsed = parse_claude_json_output(completed.stdout)
+        session_id = extract_claude_session_id(parsed)
+        record.exit_code = completed.returncode
+        record.output_payload = extract_claude_result_text(parsed) or completed.stdout
+        record.stderr = build_claude_diagnostics(completed.stderr, parsed)
+        record.external_thread_id = session_id or resume_session_id
+        record.external_turn_id = extract_claude_turn_id(parsed)
+        record.status = RunStatus.SUCCEEDED if completed.returncode == 0 and not is_claude_error(parsed) else RunStatus.FAILED
+        if completed.returncode != 0:
+            record.error_message = completed.stderr or completed.stdout or f"Claude CLI exited with {completed.returncode}"
+        if not parsed and completed.stdout:
+            record.error_message = "Claude CLI did not return valid JSON"
+            record.status = RunStatus.FAILED
+        if record.status == RunStatus.SUCCEEDED and session_id:
+            claude_session.external_session_id = session_id
+            claude_session.status = AgentSessionStatus.ACTIVE
+            claude_session.updated_at = app_now()
+            if task_should_be_counted:
+                claude_session.task_count += 1
+            session.add(claude_session)
+        elif record.status == RunStatus.FAILED and not claude_session.external_session_id:
+            claude_session.status = AgentSessionStatus.FAILED
+            claude_session.updated_at = app_now()
+            session.add(claude_session)
+    except subprocess.TimeoutExpired:
         record.status = RunStatus.TIMED_OUT
-        record.error_message = "Agent command timed out"
+        record.error_message = "Claude CLI command timed out"
     except OSError as exc:
         record.status = RunStatus.FAILED
         record.error_message = str(exc)
@@ -242,6 +337,88 @@ async def run_local_agent(session: Session, task_id: int, run_type: str) -> Agen
         session.refresh(record)
 
     return record
+
+
+def build_claude_cli_command(command: list[str], resume_session_id: str | None) -> list[str]:
+    cli_command = [
+        *command,
+        "-p",
+        "--output-format",
+        "json",
+        "--permission-mode",
+        "acceptEdits",
+        "--allowedTools",
+        "Read,Edit,MultiEdit,Glob,Grep",
+        "--disallowedTools",
+        "Bash",
+    ]
+    if resume_session_id:
+        cli_command.extend(["--resume", resume_session_id])
+    return cli_command
+
+
+def display_claude_command(command: list[str], uses_resume: bool) -> str:
+    suffix = " -p --output-format json --resume <session_id>" if uses_resume else " -p --output-format json"
+    return f"{' '.join(command)}{suffix}"
+
+
+def parse_claude_json_output(stdout: str) -> dict[str, Any] | None:
+    if not stdout.strip():
+        return None
+    try:
+        parsed = json.loads(stdout)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def extract_claude_session_id(parsed: dict[str, Any] | None) -> str | None:
+    if not parsed:
+        return None
+    for key in ("session_id", "sessionId", "sessionID"):
+        value = parsed.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def extract_claude_turn_id(parsed: dict[str, Any] | None) -> str | None:
+    if not parsed:
+        return None
+    value = parsed.get("uuid")
+    return value if isinstance(value, str) and value else None
+
+
+def extract_claude_result_text(parsed: dict[str, Any] | None) -> str | None:
+    if not parsed:
+        return None
+    value = parsed.get("result")
+    return value if isinstance(value, str) else None
+
+
+def is_claude_error(parsed: dict[str, Any] | None) -> bool:
+    if not parsed:
+        return False
+    return bool(parsed.get("is_error")) or parsed.get("subtype") == "error"
+
+
+def build_claude_diagnostics(stderr: str, parsed: dict[str, Any] | None) -> str | None:
+    diagnostics: dict[str, Any] = {}
+    if stderr:
+        diagnostics["stderr"] = stderr
+    if parsed:
+        diagnostics["result_type"] = parsed.get("type")
+        diagnostics["subtype"] = parsed.get("subtype")
+        diagnostics["is_error"] = parsed.get("is_error")
+        diagnostics["session_id"] = parsed.get("session_id")
+        diagnostics["uuid"] = parsed.get("uuid")
+        diagnostics["duration_ms"] = parsed.get("duration_ms")
+        diagnostics["num_turns"] = parsed.get("num_turns")
+        diagnostics["total_cost_usd"] = parsed.get("total_cost_usd")
+        diagnostics["permission_denials"] = parsed.get("permission_denials")
+        diagnostics["terminal_reason"] = parsed.get("terminal_reason")
+        diagnostics["modelUsage"] = parsed.get("modelUsage")
+    return json.dumps(diagnostics, ensure_ascii=False, indent=2) if diagnostics else None
 
 
 class CodexAppServerProcess:

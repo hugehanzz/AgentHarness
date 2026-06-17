@@ -55,6 +55,7 @@ export interface AgentRun {
   id: number
   task_id: number | null
   worker_id: number | null
+  agent_session_id: number | null
   run_type: string
   provider_type: string
   external_thread_id: string | null

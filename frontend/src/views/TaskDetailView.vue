@@ -206,9 +206,13 @@ async function loadTask() {
   }
 }
 
+function refreshAgentRuns() {
+  agentRunsRefreshKey.value += 1
+}
+
 async function runAgentByType(runType: string) {
   const { data } = await api.post<AgentRun>(`/tasks/${taskId}/agent-runs`, { run_type: runType })
-  agentRunsRefreshKey.value += 1
+  refreshAgentRuns()
   ElMessage.success(`${runType} finished with ${data.status}`)
 }
 
@@ -233,8 +237,12 @@ async function runCurrentAgent() {
 
 async function transition(toStatus: TaskStatus) {
   flowActionRunning.value = toStatus
+  const previousStatus = store.selectedTask?.status
   try {
     await store.transitionTask(taskId, toStatus, `Human Supervisor: ${actionLabel(toStatus)}`)
+    if (store.selectedTask?.status && store.selectedTask.status !== previousStatus) {
+      refreshAgentRuns()
+    }
     await runAgentForTransition(toStatus)
   } catch (error: any) {
     ElMessage.error(error?.response?.data?.detail || error?.message || 'Flow action failed')

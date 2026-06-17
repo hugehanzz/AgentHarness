@@ -48,6 +48,7 @@ def ensure_agent_run_columns() -> None:
 
     existing_columns = {column["name"] for column in inspector.get_columns("agentrun")}
     column_sql = {
+        "agent_session_id": "INTEGER NULL",
         "provider_type": "VARCHAR(80) NOT NULL DEFAULT 'local_cli'",
         "external_thread_id": "VARCHAR(120) NULL",
         "external_turn_id": "VARCHAR(120) NULL",

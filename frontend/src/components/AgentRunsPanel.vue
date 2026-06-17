@@ -28,6 +28,7 @@ const runTypeLabels: Record<string, string> = {
 const providerLabels: Record<string, string> = {
   codex_app_server: 'Codex App Server',
   local_cli: 'Local CLI',
+  claude_cli: 'Claude CLI',
 }
 
 function runTypeLabel(runType: string) {

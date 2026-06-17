@@ -1,5 +1,5 @@
 import asyncio
-import sys
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -8,7 +8,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 
 import app.models  # noqa: F401
 from app.models.task import TaskEvent
-from app.models.worker import AgentRun, RunStatus
+from app.models.worker import AgentRun, AgentSession, AgentSessionStatus, RunStatus
 from app.scheduler.workers import ensure_workers
 from app.schemas.task import TaskCreate
 from app.services import agent_run_service
@@ -42,13 +42,33 @@ def test_run_local_agent_requires_configured_command(monkeypatch, tmp_path):
 def test_run_local_agent_records_cli_output(monkeypatch, tmp_path):
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
-    script = "import sys; data=sys.stdin.read(); print('received=' + str('任务标题：Build task' in data))"
-    command = f'"{sys.executable}" -c "{script}"'
     monkeypatch.setattr(
         agent_run_service,
         "get_settings",
-        lambda: SimpleNamespace(agent_claude_command=command, agent_timeout_seconds=5),
+        lambda: SimpleNamespace(agent_claude_command="claude", agent_timeout_seconds=5),
     )
+
+    def fake_run(command, **kwargs):
+        assert command[:2] == ["claude", "-p"]
+        assert "--resume" not in command
+        assert "任务标题：Build task" in kwargs["input"]
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "type": "result",
+                    "subtype": "success",
+                    "is_error": False,
+                    "result": "审查完成",
+                    "session_id": "claude-session-1",
+                    "uuid": "turn-1",
+                    "permission_denials": [],
+                }
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(agent_run_service.subprocess, "run", fake_run)
 
     with Session(engine) as session:
         ensure_workers(session)
@@ -61,12 +81,127 @@ def test_run_local_agent_records_cli_output(monkeypatch, tmp_path):
 
         assert run.status == RunStatus.SUCCEEDED
         assert run.exit_code == 0
-        assert run.provider_type == "local_cli"
-        assert "received=True" in (run.output_payload or "")
+        assert run.provider_type == "claude_cli"
+        assert run.output_payload == "审查完成"
+        assert run.external_thread_id == "claude-session-1"
+        assert run.external_turn_id == "turn-1"
+        assert run.agent_session_id is not None
         saved_run = session.exec(select(AgentRun).where(AgentRun.task_id == task.id)).one()
         assert saved_run.input_payload and "任务标题：Build task" in saved_run.input_payload
+        saved_session = session.get(AgentSession, run.agent_session_id)
+        assert saved_session
+        assert saved_session.external_session_id == "claude-session-1"
+        assert saved_session.task_count == 1
         event = session.exec(select(TaskEvent).where(TaskEvent.task_id == task.id)).all()[-1]
         assert event.event_type == "AGENT_RUN_COMPLETED"
+
+
+def test_claude_recheck_reuses_task_session_without_incrementing(monkeypatch, tmp_path):
+    engine = create_engine("sqlite:///:memory:")
+    SQLModel.metadata.create_all(engine)
+    monkeypatch.setattr(
+        agent_run_service,
+        "get_settings",
+        lambda: SimpleNamespace(agent_claude_command="claude", agent_timeout_seconds=5),
+    )
+    commands = []
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "type": "result",
+                    "subtype": "success",
+                    "is_error": False,
+                    "result": "ok",
+                    "session_id": "claude-session-1",
+                    "uuid": f"turn-{len(commands)}",
+                    "permission_denials": [],
+                }
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(agent_run_service.subprocess, "run", fake_run)
+
+    with Session(engine) as session:
+        ensure_workers(session)
+        task = create_task(
+            session,
+            TaskCreate(title="Review task", description="Requirement", workspace_path=str(tmp_path)),
+        )
+
+        review_run = asyncio.run(run_local_agent(session, task.id, "claude_review"))
+        recheck_run = asyncio.run(run_local_agent(session, task.id, "claude_recheck"))
+
+        assert review_run.agent_session_id == recheck_run.agent_session_id
+        assert "--resume" not in commands[0]
+        assert commands[1][-2:] == ["--resume", "claude-session-1"]
+        saved_session = session.get(AgentSession, review_run.agent_session_id)
+        assert saved_session
+        assert saved_session.task_count == 1
+
+
+def test_claude_session_rotates_after_five_distinct_tasks(monkeypatch, tmp_path):
+    engine = create_engine("sqlite:///:memory:")
+    SQLModel.metadata.create_all(engine)
+    monkeypatch.setattr(
+        agent_run_service,
+        "get_settings",
+        lambda: SimpleNamespace(agent_claude_command="claude", agent_timeout_seconds=5),
+    )
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        session_id = "claude-session-2" if len(calls) == 1 else "claude-session-unexpected"
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "type": "result",
+                    "subtype": "success",
+                    "is_error": False,
+                    "result": "ok",
+                    "session_id": session_id,
+                    "uuid": "turn",
+                    "permission_denials": [],
+                }
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(agent_run_service.subprocess, "run", fake_run)
+
+    with Session(engine) as session:
+        ensure_workers(session)
+        existing_session = AgentSession(
+            provider_type="claude_cli",
+            workspace_path=str(tmp_path.resolve()),
+            external_session_id="claude-session-1",
+            task_count=5,
+            status=AgentSessionStatus.ACTIVE,
+        )
+        session.add(existing_session)
+        session.commit()
+        task = create_task(
+            session,
+            TaskCreate(title="Sixth task", description="Requirement", workspace_path=str(tmp_path)),
+        )
+
+        run = asyncio.run(run_local_agent(session, task.id, "claude_review"))
+
+        assert "--resume" not in calls[0]
+        assert run.external_thread_id == "claude-session-2"
+        rotated_session = session.get(AgentSession, existing_session.id)
+        assert rotated_session
+        assert rotated_session.status == AgentSessionStatus.ROTATED
+        new_session = session.get(AgentSession, run.agent_session_id)
+        assert new_session
+        assert new_session.external_session_id == "claude-session-2"
+        assert new_session.task_count == 1
 
 
 def test_codex_run_uses_app_server_adapter(monkeypatch, tmp_path):

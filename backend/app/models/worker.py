@@ -32,6 +32,12 @@ class RunStatus(StrEnum):
     TIMED_OUT = "TIMED_OUT"
 
 
+class AgentSessionStatus(StrEnum):
+    ACTIVE = "ACTIVE"
+    ROTATED = "ROTATED"
+    FAILED = "FAILED"
+
+
 class AgentWorker(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     name: str = Field(index=True, unique=True, max_length=120)
@@ -47,6 +53,7 @@ class AgentRun(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     task_id: int | None = Field(default=None, index=True, foreign_key="task.id")
     worker_id: int | None = Field(default=None, index=True, foreign_key="agentworker.id")
+    agent_session_id: int | None = Field(default=None, index=True, foreign_key="agentsession.id")
     run_type: str = Field(index=True, max_length=100)
     provider_type: str = Field(default="local_cli", index=True, max_length=80)
     external_thread_id: str | None = Field(default=None, index=True, max_length=120)
@@ -62,3 +69,15 @@ class AgentRun(SQLModel, table=True):
     started_at: datetime | None = None
     finished_at: datetime | None = None
     created_at: datetime = Field(default_factory=app_now)
+
+
+class AgentSession(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    provider_type: str = Field(index=True, max_length=80)
+    workspace_path: str = Field(index=True, max_length=1000)
+    external_session_id: str | None = Field(default=None, index=True, max_length=120)
+    task_count: int = Field(default=0)
+    status: AgentSessionStatus = Field(default=AgentSessionStatus.ACTIVE, index=True)
+    created_at: datetime = Field(default_factory=app_now)
+    updated_at: datetime = Field(default_factory=app_now)
+    rotated_at: datetime | None = None

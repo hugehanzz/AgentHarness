@@ -15,6 +15,7 @@ class AgentRunRead(BaseModel):
     id: int
     task_id: int | None
     worker_id: int | None
+    agent_session_id: int | None
     run_type: str
     provider_type: str
     external_thread_id: str | None
