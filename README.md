@@ -2,7 +2,7 @@
 
 AgentHarness 是一个本地运行的、人类监督的 Agent 工作流控制台。它用于帮助 Human Supervisor 管理从需求录入、计划确认、开发实现、代码评审、问题修复、复查、验收到归档的完整流程。
 
-第一版不会直接调用 OpenAI、Claude 或 DeepSeek API。Codex 和 Claude-DeepSeek 仍然作为外部人机协作 worker 存在；AgentHarness 负责保存流程状态、提示词来源、评审结果、验收清单、安全命令入口、worker 状态和事件记录。
+当前版本不会直接调用 OpenAI、Claude 或 DeepSeek API。系统通过本机已安装的 Codex / Claude CLI 能力接入受控 worker：Codex 通过 App Server 协议执行计划、开发和修复；Claude-DeepSeek 通过 Claude CLI 执行评审和复审，并维护业务项目中的 `REVIEW.md`。AgentHarness 负责保存流程状态、提示词来源、Agent Run 证据、评审结果、验收清单、安全命令入口、worker 状态和事件记录。
 
 ## 当前范围
 
@@ -12,23 +12,43 @@ AgentHarness 是一个本地运行的、人类监督的 Agent 工作流控制台
   - 9 阶段 Flow State。
   - 可编辑的 Requirement 文本，作为提示词生成的重要来源。
   - Workers 状态概览。
+  - Agent Runs，展示 Codex / Claude 执行结果、运行详情和诊断信息。
   - Prompt Builder 模板选择器，并根据当前 Flow State 默认推荐下一步模板。
   - Review Results，用于解析外部业务项目的 `REVIEW.md`。
   - Safe Commands 面板。
   - Human acceptance checklist。
   - Events 时间线，使用中文流程描述和可读时间格式。
+- Flow State 可以直接调度受控 worker：
+  - `Plan` 阶段运行 Codex Plan。
+  - `Build` 阶段运行 Codex Implement。
+  - `Review` 阶段运行 Claude Review。
+  - `Fix` 阶段运行 Codex Fix。
+  - `Recheck` 阶段运行 Claude Recheck。
+- Flow State 每次进入新阶段后会自动刷新 Agent Runs，Agent 执行完成后也会再次刷新证据。
+- Codex App Server 会在任务指定的 `workspace_path` 下启动，并复用同一任务的 Codex thread。
+- Claude CLI 会在任务指定的 `workspace_path` 下启动，并复用 Claude `session_id`；同一 workspace 大约每 5 个不同任务轮换一次 Claude review session。
 - 通过机器可读 JSON 块解析外部业务项目的 `REVIEW.md`。
 - 保留 Human Supervisor 的人工关卡，不自动确认计划，也不自动通过验收。
+- 已建立测试业务工程 `D:\codexProject\AgentHarnessTest`，用于开发阶段验证 Codex / Claude 协作链路。
 
-## 暂时禁用的前端按钮
+## 当前仍未完成或暂时禁用的能力
 
-第一版前端暂时保留但禁用了以下按钮：
+当前前端暂时保留但禁用了以下按钮：
 
 - `Build Prompt`
 - `git status`
 - `git diff --stat`
 
 后端里可能仍然保留了提示词和安全命令相关接口，但当前前端不会主动触发这些能力。
+
+Archive 阶段目前仍是 Human Supervisor 手动推进。业务设计上，后续应由 `ArchiveCheckWorker` 做归档完整性检查，例如检查业务项目 `README.md`、`REVIEW.md`、测试证据和验收记录是否齐备；是否真正进入 `Done` 仍由 Human Supervisor 决定。
+
+首页 `Human Gates` 当前统计两个核心人工关卡：
+
+- `PLAN_READY`：计划待 Human Supervisor 确认。
+- `ACCEPTANCE_READY`：最终验收待 Human Supervisor 确认。
+
+后续可以扩展统计 `REVIEW_DONE`、`RECHECK_DONE`、`ACCEPTANCE_PASSED`、`ARCHIVED` 等需要人决策的状态。
 
 ## REVIEW.md 解析约定
 
@@ -116,8 +136,15 @@ copy .env.example .env
 
 ```env
 DATABASE_URL=mysql+pymysql://root:123456@localhost:3306/agentharness
+AGENT_TIMEOUT_SECONDS=600
+CODEX_APP_SERVER_COMMAND=D:\NodeJS\codex.cmd app-server
+AGENT_CLAUDE_COMMAND=C:\Users\<you>\.local\bin\claude.exe
 APP_TIMEZONE=Asia/Shanghai
 ```
+
+`CODEX_APP_SERVER_COMMAND` 应指向本机可执行的 Codex App Server 命令。  
+`AGENT_CLAUDE_COMMAND` 应指向本机 Claude CLI 可执行文件。  
+AgentHarness 会在任务的 `workspace_path` 下启动这些 worker，确保 Codex / Claude 面向正确工程工作。
 
 启动后端：
 
@@ -171,18 +198,66 @@ npm run build
 
 - Human Supervisor：负责人类确认，包括需求、计划、依赖、高风险修复、最终验收和下一个模块决策。
 - OrchestratorAgent：整理需求、生成提示词、推进状态并推荐下一步。
-- DeveloperAgent：第一版中代表外部 Codex worker。
-- ReviewerAgent：第一版中代表外部 Claude-DeepSeek，并由它维护业务项目的 `REVIEW.md`。
+- DeveloperAgent：代表本地 Codex worker，通过 Codex App Server 执行计划、开发和修复。
+- ReviewerAgent：代表本地 Claude-DeepSeek worker，通过 Claude CLI 执行代码评审和复审，并维护业务项目的 `REVIEW.md`。
 - AcceptanceAgent：生成验收清单并记录证据。
 - CommandWorker：只运行已注册的安全命令。
 - ReviewParserWorker：只读解析 `REVIEW.md`，不修改它。
 - ArchiveCheckWorker：检查 README 归档完整性，不修改业务项目。
 
+## Agent 接入状态
+
+### Codex App Server
+
+Codex 通过 App Server 方式接入：
+
+```text
+codex app-server --listen ws://127.0.0.1:<port>
+```
+
+后端负责：
+
+- 为每次运行启动本地 App Server。
+- 创建或恢复 Codex thread。
+- 在任务 `workspace_path` 下启动 turn。
+- Plan 阶段使用只读模式。
+- Implement / Fix 阶段使用 workspace-write 模式。
+- 保存 thread id、turn id、输出、诊断事件和执行状态。
+
+### Claude CLI
+
+Claude 通过非交互 CLI 方式接入：
+
+```text
+claude -p --output-format json --permission-mode acceptEdits
+```
+
+当前限制工具为：
+
+```text
+Read, Edit, MultiEdit, Glob, Grep
+```
+
+并禁用：
+
+```text
+Bash
+```
+
+后端负责：
+
+- 在任务 `workspace_path` 下启动 Claude。
+- 从 JSON 输出中解析 `session_id`、`uuid`、结果文本和诊断信息。
+- Review / Recheck 复用同一任务的 Claude session。
+- 同一 workspace 下每 5 个不同任务自动轮换一次 Claude review session。
+- 将 Claude 的中文结论展示在 Agent Runs 中，并把模型使用、权限拒绝、退出原因等信息放进 Diagnostics。
+
 ## 第一版不做的事
 
 - 不直接调用 OpenAI、Claude 或 DeepSeek API。
-- 不自动修改外部业务项目代码。
-- 不自动修改业务项目 `REVIEW.md`。
+- 不绕过本地 Codex / Claude CLI 直接调用模型 API。
+- 不让 AgentHarness 自己越过 worker 直接修改外部业务项目代码。
+- 不让 Codex 修改业务项目 `REVIEW.md`；该文件由 Claude-DeepSeek 维护。
 - 不自动确认计划。
 - 不自动通过验收。
 - 未经 Human Supervisor 确认，不安装依赖。
@@ -190,9 +265,10 @@ npm run build
 
 ## 后续计划
 
-- 在模板内容和流程切换稳定后，重新启用 Prompt Builder。
+- 完善 Archive 阶段，由 ArchiveCheckWorker 检查归档材料完整性。
+- 重新启用 Prompt Builder，并把生成结果与 Flow State 调度打通。
 - 重新启用 Safe Commands，并增加更清晰的输出展示和命令证据记录。
 - 支持项目级提示词模板覆盖。
 - 增加 `REVIEW.md` 机器 JSON 和普通 Markdown 描述之间的一致性检查。
-- 增加业务项目 README 归档检查。
+- 在首页更准确地区分 Human Gates、Active Flows 和 Agent Running。
 - 增加更完整的队列、迁移和生产化部署能力。
