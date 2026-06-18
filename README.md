@@ -2,7 +2,7 @@
 
 AgentHarness 是一个本地运行的、人类监督的 Agent 工作流控制台。它用于帮助 Human Supervisor 管理从需求录入、计划确认、开发实现、代码评审、问题修复、复查、验收到归档的完整流程。
 
-当前版本不会直接调用 OpenAI、Claude 或 DeepSeek API。系统通过本机已安装的 Codex / Claude CLI 能力接入受控 worker：Codex 通过 App Server 协议执行计划、开发和修复；Claude-DeepSeek 通过 Claude CLI 执行评审和复审，并维护业务项目中的 `REVIEW.md`。AgentHarness 负责保存流程状态、提示词来源、Agent Run 证据、评审结果、验收清单、安全命令入口、worker 状态和事件记录。
+当前版本不会直接调用 OpenAI、Claude、DeepSeek 或 Gemini API。系统通过本机已安装的 Codex / Claude CLI 能力接入受控 worker：Codex 通过 App Server 协议执行计划、开发、修复和 README 归档维护；Claude-DeepSeek 通过 Claude CLI 执行评审和复审，并维护业务项目中的 `REVIEW.md`；Gemini 暂定为第三个 agent，用于使用提醒、进度摘要、门禁提示和安全流程推进建议。AgentHarness 负责保存流程状态、提示词来源、Agent Run 证据、评审结果、验收清单、安全命令入口、worker 状态和事件记录。
 
 ## 当前范围
 
@@ -41,7 +41,7 @@ AgentHarness 是一个本地运行的、人类监督的 Agent 工作流控制台
 
 后端里可能仍然保留了提示词和安全命令相关接口，但当前前端不会主动触发这些能力。
 
-Archive 阶段目前仍是 Human Supervisor 手动推进。业务设计上，后续应由 `ArchiveCheckWorker` 做归档完整性检查，例如检查业务项目 `README.md`、`REVIEW.md`、测试证据和验收记录是否齐备；是否真正进入 `Done` 仍由 Human Supervisor 决定。
+Archive 阶段目前仍是 Human Supervisor 手动推进。业务设计上，归档内容应由 Codex 负责维护，因为 Codex 是实际开发者，README 是给 Codex 和人类开发者共同阅读的工程记忆。Archive checker 是 Codex 侧的归档辅助检查服务，用于检查业务项目根目录、前端、后端、App 端、数据库等位置的 `README.md` 是否覆盖验收状态、验证结果、归档说明和后续建议；`REVIEW.md` 仍只由 Claude-DeepSeek 维护。是否真正进入 `Done` 仍由 Human Supervisor 决定。
 
 首页 `Human Gates` 当前统计两个核心人工关卡：
 
@@ -196,14 +196,20 @@ npm run build
 
 ## 角色说明
 
-- Human Supervisor：负责人类确认，包括需求、计划、依赖、高风险修复、最终验收和下一个模块决策。
-- OrchestratorAgent：整理需求、生成提示词、推进状态并推荐下一步。
-- DeveloperAgent：代表本地 Codex worker，通过 Codex App Server 执行计划、开发和修复。
+AgentWorker 只登记真正会作为独立执行主体运行的 agent，当前收敛为三个：
+
+- CodexAgent：代表本地 Codex worker，通过 Codex App Server 执行计划、开发、修复和 README 归档维护。归档是 Codex 的开发者记忆职责，不交给评审 agent。
 - ReviewerAgent：代表本地 Claude-DeepSeek worker，通过 Claude CLI 执行代码评审和复审，并维护业务项目的 `REVIEW.md`。
-- AcceptanceAgent：生成验收清单并记录证据。
-- CommandWorker：只运行已注册的安全命令。
-- ReviewParserWorker：只读解析 `REVIEW.md`，不修改它。
-- ArchiveCheckWorker：检查 README 归档完整性，不修改业务项目。
+- GeminiAgent：第三个待接入 agent，定位为 AgentHarness 的“秘书”。它提醒使用者怎样使用系统、汇总开发进度、提示待处理门禁、建议可安全自动推进的流程动作，但不能代替 Human Supervisor 批准计划、依赖、验收或高风险修复。
+
+以下能力不是 AgentWorker，而是控制面服务、工具或人工门禁：
+
+- Human Supervisor：负责人类确认，包括需求、计划、依赖、高风险修复、最终验收和下一个模块决策。
+- State machine / Prompt Builder：整理上下文、生成提示词、推进状态并推荐下一步。
+- Acceptance checklist：生成验收清单并记录证据。
+- Safe command executor：只运行已注册的安全命令。
+- Review parser：只读解析 `REVIEW.md`，不修改它。
+- Archive checker：Codex 侧辅助检查 README 归档完整性，可覆盖根目录、前端、后端、App 端、数据库等多份 README；不修改 `REVIEW.md`。
 
 ## Agent 接入状态
 
@@ -221,7 +227,7 @@ codex app-server --listen ws://127.0.0.1:<port>
 - 创建或恢复 Codex thread。
 - 在任务 `workspace_path` 下启动 turn。
 - Plan 阶段使用只读模式。
-- Implement / Fix 阶段使用 workspace-write 模式。
+- Implement / Fix / Archive 阶段使用 workspace-write 模式。
 - 保存 thread id、turn id、输出、诊断事件和执行状态。
 
 ### Claude CLI
@@ -254,10 +260,11 @@ Bash
 
 ## 第一版不做的事
 
-- 不直接调用 OpenAI、Claude 或 DeepSeek API。
+- 不直接调用 OpenAI、Claude、DeepSeek 或 Gemini API。
 - 不绕过本地 Codex / Claude CLI 直接调用模型 API。
 - 不让 AgentHarness 自己越过 worker 直接修改外部业务项目代码。
 - 不让 Codex 修改业务项目 `REVIEW.md`；该文件由 Claude-DeepSeek 维护。
+- 不让 GeminiAgent 越过 Human Supervisor 自动批准计划、依赖、验收或高风险修复。
 - 不自动确认计划。
 - 不自动通过验收。
 - 未经 Human Supervisor 确认，不安装依赖。
@@ -265,7 +272,8 @@ Bash
 
 ## 后续计划
 
-- 完善 Archive 阶段，由 ArchiveCheckWorker 检查归档材料完整性。
+- 完善 Archive 阶段：由 Codex 更新 README 归档，由 Codex 侧 archive checker 检查多份 README 归档材料完整性。
+- 接入 GeminiAgent，用于使用提醒、进度摘要、门禁提示和安全流程推进建议。
 - 重新启用 Prompt Builder，并把生成结果与 Flow State 调度打通。
 - 重新启用 Safe Commands，并增加更清晰的输出展示和命令证据记录。
 - 支持项目级提示词模板覆盖。

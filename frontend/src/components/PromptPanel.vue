@@ -14,7 +14,7 @@ const promptTypes = [
   { value: 'CODEX_FIX', label: 'Codex：修复评审问题' },
   { value: 'CLAUDE_RECHECK', label: 'Claude：复审修复结果' },
   { value: 'ACCEPTANCE_CHECKLIST', label: '生成验收清单' },
-  { value: 'README_ARCHIVE', label: '生成归档说明' },
+  { value: 'README_ARCHIVE', label: 'Codex：README归档' },
 ]
 
 const selectedType = ref('CODEX_PLAN')

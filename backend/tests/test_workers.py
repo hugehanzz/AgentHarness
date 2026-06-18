@@ -16,20 +16,17 @@ def test_ensure_workers_creates_collaboration_agents():
         assert {worker.name for worker in workers} == {
             "Claude-DeepSeek",
             "Codex",
-            "Human Supervisor",
-            "Orchestrator",
+            "Gemini",
         }
         assert {worker.role for worker in workers} == {
-            WorkerRole.ACCEPTANCE,
-            WorkerRole.DEVELOPER,
-            WorkerRole.ORCHESTRATOR,
+            WorkerRole.CODEX,
+            WorkerRole.GEMINI,
             WorkerRole.REVIEWER,
         }
         assert {worker.worker_type for worker in workers} == {
             "codex_app_server",
-            "external_llm_planned",
-            "human_gate",
             "local_cli_agent",
+            "planned_agent",
         }
 
 

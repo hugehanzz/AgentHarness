@@ -49,9 +49,7 @@ const gateTasks = computed(() =>
   store.tasks.filter((task) => ['PLAN_READY', 'ACCEPTANCE_READY'].includes(task.status)).length,
 )
 
-const onlineWorkers = computed(() =>
-  store.workers.filter((worker) => worker.is_online || worker.name === 'Human Supervisor').length,
-)
+const onlineWorkers = computed(() => store.workers.filter((worker) => worker.is_online).length)
 
 const pagedTasks = computed(() => {
   const start = (taskPage.value - 1) * taskPageSize

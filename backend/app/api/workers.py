@@ -4,6 +4,7 @@ from sqlmodel import Session, select
 from app.core.database import get_session
 from app.models.common import app_now
 from app.models.worker import AgentWorker
+from app.scheduler.workers import ACTIVE_WORKER_NAMES
 from app.schemas.worker import AgentWorkerRead
 
 router = APIRouter(prefix="/workers", tags=["workers"])
@@ -12,7 +13,9 @@ router = APIRouter(prefix="/workers", tags=["workers"])
 @router.get("", response_model=list[AgentWorkerRead])
 def list_workers(session: Session = Depends(get_session)):
     now = app_now()
-    workers = session.exec(select(AgentWorker).order_by(AgentWorker.name)).all()
+    workers = session.exec(
+        select(AgentWorker).where(AgentWorker.name.in_(ACTIVE_WORKER_NAMES)).order_by(AgentWorker.name)
+    ).all()
     result = []
     for worker in workers:
         heartbeat_at = worker.last_heartbeat_at

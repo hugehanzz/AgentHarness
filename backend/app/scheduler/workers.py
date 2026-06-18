@@ -16,11 +16,12 @@ class WorkerAgent(ABC):
 
 
 WORKER_DEFINITIONS = [
-    ("Orchestrator", WorkerRole.ORCHESTRATOR, "external_llm_planned"),
-    ("Codex", WorkerRole.DEVELOPER, "codex_app_server"),
+    ("Codex", WorkerRole.CODEX, "codex_app_server"),
     ("Claude-DeepSeek", WorkerRole.REVIEWER, "local_cli_agent"),
-    ("Human Supervisor", WorkerRole.ACCEPTANCE, "human_gate"),
+    ("Gemini", WorkerRole.GEMINI, "planned_agent"),
 ]
+
+ACTIVE_WORKER_NAMES = {name for name, _role, _worker_type in WORKER_DEFINITIONS}
 
 
 def ensure_workers(session: Session) -> None:
@@ -37,7 +38,7 @@ def ensure_workers(session: Session) -> None:
 
 def heartbeat_workers(session: Session) -> None:
     now = app_now()
-    workers = session.exec(select(AgentWorker)).all()
+    workers = session.exec(select(AgentWorker).where(AgentWorker.name.in_(ACTIVE_WORKER_NAMES))).all()
     for worker in workers:
         if worker.worker_type not in {"internal", "local_cli_agent"}:
             continue

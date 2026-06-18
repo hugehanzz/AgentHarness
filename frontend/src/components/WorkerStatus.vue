@@ -5,17 +5,12 @@ import { useTasksStore } from '../stores/tasks'
 
 const store = useTasksStore()
 
-function isHumanSupervisor(workerName: string) {
-  return workerName === 'Human Supervisor'
-}
-
 function displayStatus(worker: { name: string; status: string; is_online: boolean }) {
-  if (isHumanSupervisor(worker.name)) return 'ONLINE'
   return worker.is_online ? worker.status : 'OFFLINE'
 }
 
 function isDisplayOnline(worker: { name: string; is_online: boolean }) {
-  return isHumanSupervisor(worker.name) || worker.is_online
+  return worker.is_online
 }
 
 onMounted(() => store.fetchWorkers())
@@ -40,7 +35,7 @@ onMounted(() => store.fetchWorkers())
         <span>{{ worker.name }}</span>
         <span class="registry-role">
           <el-icon>
-            <Cpu v-if="worker.role.includes('COMMAND')" />
+            <Cpu v-if="worker.role.includes('CODEX')" />
             <View v-else-if="worker.role.includes('REVIEW')" />
             <User v-else />
           </el-icon>

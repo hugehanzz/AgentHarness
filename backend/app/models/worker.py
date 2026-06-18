@@ -8,13 +8,9 @@ from app.models.common import app_now
 
 
 class WorkerRole(StrEnum):
-    ORCHESTRATOR = "ORCHESTRATOR"
-    DEVELOPER = "DEVELOPER"
+    CODEX = "CODEX"
     REVIEWER = "REVIEWER"
-    ACCEPTANCE = "ACCEPTANCE"
-    COMMAND = "COMMAND"
-    REVIEW_PARSER = "REVIEW_PARSER"
-    ARCHIVE_CHECK = "ARCHIVE_CHECK"
+    GEMINI = "GEMINI"
 
 
 class WorkerStatus(StrEnum):
