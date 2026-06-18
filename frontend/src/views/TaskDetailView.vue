@@ -105,7 +105,7 @@ const actionLabels: Partial<Record<TaskStatus, string>> = {
   RECHECK_DONE: '标记复审完成',
   ACCEPTANCE_READY: '进入验收',
   ACCEPTANCE_PASSED: '标记验收通过',
-  ARCHIVED: '归档任务',
+  ARCHIVED: 'Codex 归档',
   DONE: '标记完成',
 }
 
@@ -142,6 +142,7 @@ const agentRunByTransition: Partial<Record<TaskStatus, string>> = {
   REVIEW_REQUESTED: 'claude_review',
   FIXING: 'codex_fix',
   RECHECK_REQUESTED: 'claude_recheck',
+  ARCHIVED: 'codex_archive',
 }
 
 const agentRunByCurrentStatus: Partial<Record<TaskStatus, string>> = {
@@ -150,6 +151,7 @@ const agentRunByCurrentStatus: Partial<Record<TaskStatus, string>> = {
   REVIEW_REQUESTED: 'claude_review',
   FIXING: 'codex_fix',
   RECHECK_REQUESTED: 'claude_recheck',
+  ARCHIVED: 'codex_archive',
 }
 
 const agentRunLabels: Record<string, string> = {
@@ -158,6 +160,7 @@ const agentRunLabels: Record<string, string> = {
   claude_review: '运行 Claude Review',
   codex_fix: '运行 Codex Fix',
   claude_recheck: '运行 Claude Recheck',
+  codex_archive: '运行 Codex Archive',
 }
 
 const currentAgentRunType = computed(() => {

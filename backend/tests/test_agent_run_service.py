@@ -316,6 +316,120 @@ def test_codex_run_reuses_latest_thread(monkeypatch, tmp_path):
         assert run.external_turn_id == "turn-2"
 
 
+def test_codex_archive_run_records_archive_check(monkeypatch, tmp_path):
+    engine = create_engine("sqlite:///:memory:")
+    SQLModel.metadata.create_all(engine)
+    monkeypatch.setattr(
+        agent_run_service,
+        "get_settings",
+        lambda: SimpleNamespace(codex_app_server_command="codex app-server", agent_timeout_seconds=5),
+    )
+    monkeypatch.setattr(
+        agent_run_service,
+        "check_readme_archive",
+        lambda workspace_path: {
+            "readme_path": str(tmp_path / "README.md"),
+            "readme_paths": [str(tmp_path / "README.md")],
+            "has_acceptance_status": True,
+            "has_test_results": True,
+            "has_archive_notes": True,
+            "has_next_steps": True,
+        },
+    )
+
+    class FakeCodexAppServerProcess:
+        @classmethod
+        async def start(cls, command, cwd):
+            return cls()
+
+        async def run_turn(self, prompt, cwd, thread_id, run_type):
+            assert run_type == "codex_archive"
+            assert "README" in prompt
+            assert "归档" in prompt
+            return {
+                "thread_id": "thread-archive",
+                "turn_id": "turn-archive",
+                "agent_text": "archive ready",
+                "diagnostics": "codex diagnostics",
+                "completed": True,
+            }
+
+        async def stop(self):
+            pass
+
+    monkeypatch.setattr(agent_run_service, "CodexAppServerProcess", FakeCodexAppServerProcess)
+
+    with Session(engine) as session:
+        ensure_workers(session)
+        task = create_task(
+            session,
+            TaskCreate(title="Archive task", description="Requirement", workspace_path=str(tmp_path)),
+        )
+
+        run = asyncio.run(run_agent(session, task.id, "codex_archive"))
+
+        assert run.status == RunStatus.SUCCEEDED
+        assert run.external_thread_id == "thread-archive"
+        assert run.output_payload == "archive ready"
+        assert run.stderr and "codex diagnostics" in run.stderr
+        assert "archive_check" in run.stderr
+        assert "has_archive_notes" in run.stderr
+
+
+def test_codex_archive_run_fails_when_archive_check_is_incomplete(monkeypatch, tmp_path):
+    engine = create_engine("sqlite:///:memory:")
+    SQLModel.metadata.create_all(engine)
+    monkeypatch.setattr(
+        agent_run_service,
+        "get_settings",
+        lambda: SimpleNamespace(codex_app_server_command="codex app-server", agent_timeout_seconds=5),
+    )
+    monkeypatch.setattr(
+        agent_run_service,
+        "check_readme_archive",
+        lambda workspace_path: {
+            "readme_path": str(tmp_path / "README.md"),
+            "readme_paths": [str(tmp_path / "README.md")],
+            "has_acceptance_status": True,
+            "has_test_results": False,
+            "has_archive_notes": True,
+            "has_next_steps": True,
+        },
+    )
+
+    class FakeCodexAppServerProcess:
+        @classmethod
+        async def start(cls, command, cwd):
+            return cls()
+
+        async def run_turn(self, prompt, cwd, thread_id, run_type):
+            return {
+                "thread_id": "thread-archive",
+                "turn_id": "turn-archive",
+                "agent_text": "archive ready",
+                "diagnostics": None,
+                "completed": True,
+            }
+
+        async def stop(self):
+            pass
+
+    monkeypatch.setattr(agent_run_service, "CodexAppServerProcess", FakeCodexAppServerProcess)
+
+    with Session(engine) as session:
+        ensure_workers(session)
+        task = create_task(
+            session,
+            TaskCreate(title="Archive task", description="Requirement", workspace_path=str(tmp_path)),
+        )
+
+        run = asyncio.run(run_agent(session, task.id, "codex_archive"))
+
+        assert run.status == RunStatus.FAILED
+        assert run.error_message == "Archive check missing: has_test_results"
+        assert run.stderr and "archive_check" in run.stderr
+
+
 def test_split_command_preserves_windows_backslashes(monkeypatch):
     monkeypatch.setattr(agent_run_service.os, "name", "nt")
 

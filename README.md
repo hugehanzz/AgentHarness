@@ -24,6 +24,7 @@ AgentHarness 是一个本地运行的、人类监督的 Agent 工作流控制台
   - `Review` 阶段运行 Claude Review。
   - `Fix` 阶段运行 Codex Fix。
   - `Recheck` 阶段运行 Claude Recheck。
+  - `Archive` 阶段运行 Codex Archive，更新相关 README 并记录归档检查结果。
 - Flow State 每次进入新阶段后会自动刷新 Agent Runs，Agent 执行完成后也会再次刷新证据。
 - Codex App Server 会在任务指定的 `workspace_path` 下启动，并复用同一任务的 Codex thread。
 - Claude CLI 会在任务指定的 `workspace_path` 下启动，并复用 Claude `session_id`；同一 workspace 大约每 5 个不同任务轮换一次 Claude review session。
@@ -41,7 +42,7 @@ AgentHarness 是一个本地运行的、人类监督的 Agent 工作流控制台
 
 后端里可能仍然保留了提示词和安全命令相关接口，但当前前端不会主动触发这些能力。
 
-Archive 阶段目前仍是 Human Supervisor 手动推进。业务设计上，归档内容应由 Codex 负责维护，因为 Codex 是实际开发者，README 是给 Codex 和人类开发者共同阅读的工程记忆。Archive checker 是 Codex 侧的归档辅助检查服务，用于检查业务项目根目录、前端、后端、App 端、数据库等位置的 `README.md` 是否覆盖验收状态、验证结果、归档说明和后续建议；`REVIEW.md` 仍只由 Claude-DeepSeek 维护。是否真正进入 `Done` 仍由 Human Supervisor 决定。
+Archive 阶段目前由 Human Supervisor 手动触发，但触发后会运行 Codex Archive。业务设计上，归档内容应由 Codex 负责维护，因为 Codex 是实际开发者，README 是给 Codex 和人类开发者共同阅读的工程记忆。Archive checker 是 Codex 侧的归档辅助检查服务，用于检查业务项目根目录、前端、后端、App 端、数据库等位置的 `README.md` 是否覆盖验收状态、验证结果、归档说明和后续建议；`REVIEW.md` 仍只由 Claude-DeepSeek 维护。是否真正进入 `Done` 仍由 Human Supervisor 决定。
 
 首页 `Human Gates` 当前统计两个核心人工关卡：
 

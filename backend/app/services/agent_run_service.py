@@ -17,6 +17,7 @@ from app.models.prompt import PromptType
 from app.models.task import TaskEvent
 from app.models.worker import AgentRun, AgentSession, AgentSessionStatus, AgentWorker, RunStatus
 from app.prompts.templates import build_prompt
+from app.services.archive_check import check_readme_archive
 from app.services.task_service import get_task_or_404
 
 
@@ -24,6 +25,7 @@ CODEX_APP_SERVER_RUN_TYPES = {
     "codex_plan": PromptType.CODEX_PLAN,
     "codex_implement": PromptType.CODEX_IMPLEMENT,
     "codex_fix": PromptType.CODEX_FIX,
+    "codex_archive": PromptType.README_ARCHIVE,
 }
 
 
@@ -203,6 +205,8 @@ async def run_codex_app_server_agent(session: Session, task_id: int, run_type: s
         record.status = RunStatus.SUCCEEDED if result["completed"] else RunStatus.FAILED
         if not result["completed"]:
             record.error_message = "Codex turn did not complete"
+        if run_type == "codex_archive" and record.status == RunStatus.SUCCEEDED:
+            apply_archive_check(record, str(cwd))
     except TimeoutError:
         record.status = RunStatus.TIMED_OUT
         record.error_message = f"Codex App Server run timed out after {settings.agent_timeout_seconds} seconds"
@@ -226,6 +230,33 @@ async def run_codex_app_server_agent(session: Session, task_id: int, run_type: s
         session.refresh(record)
 
     return record
+
+
+def apply_archive_check(record: AgentRun, workspace_path: str) -> None:
+    try:
+        result = check_readme_archive(workspace_path)
+    except HTTPException as exc:
+        record.status = RunStatus.FAILED
+        record.error_message = f"Archive check failed: {exc.detail}"
+        record.stderr = append_diagnostic_payload(record.stderr, {"archive_check_error": exc.detail})
+        return
+
+    record.stderr = append_diagnostic_payload(record.stderr, {"archive_check": result})
+    missing = [
+        key
+        for key in ("has_acceptance_status", "has_test_results", "has_archive_notes", "has_next_steps")
+        if result.get(key) is not True
+    ]
+    if missing:
+        record.status = RunStatus.FAILED
+        record.error_message = f"Archive check missing: {', '.join(missing)}"
+
+
+def append_diagnostic_payload(existing: str | None, payload: dict[str, Any]) -> str:
+    rendered = json.dumps(payload, ensure_ascii=False, indent=2)
+    if existing and existing.strip():
+        return f"{existing.rstrip()}\n\n{rendered}"
+    return rendered
 
 
 async def run_local_agent(session: Session, task_id: int, run_type: str) -> AgentRun:
