@@ -22,7 +22,8 @@ const runTypeLabels: Record<string, string> = {
   codex_implement: 'Codex 执行开发',
   claude_review: 'Claude 代码评审',
   codex_fix: 'Codex 修复问题',
-  claude_recheck: 'Claude 复查',
+  claude_recheck: 'Claude 复审结果',
+  codex_archive: 'Codex README 归档',
 }
 
 const providerLabels: Record<string, string> = {

@@ -20,7 +20,7 @@ def build_prompt(task: Task, prompt_type: PromptType) -> str:
         PromptType.CODEX_FIX: "请读取 REVIEW.md，修复其中仍开放的问题，运行相关验证，并总结变更内容。不要修改 REVIEW.md。",
         PromptType.CLAUDE_RECHECK: "请复查修复结果，并在 REVIEW.md 中更新复查结论。请明确是否可以进入验收。",
         PromptType.ACCEPTANCE_CHECKLIST: "请生成 Human Supervisor 验收清单，包含证据字段和可自动检查的项目。",
-        PromptType.README_ARCHIVE: "在 Human Supervisor 批准后，请由 Codex 更新相关 README，包括根目录、前端、后端、App 端和数据库文档中与本任务相关的归档内容；记录验收状态、验证结果、归档说明和后续建议。不要修改 REVIEW.md。",
+        PromptType.README_ARCHIVE: "请根据本次任务的实际变更，判断是否需要更新相关 README，使 README 反映项目当前事实状态。如果本次任务改变了项目功能、使用方式、开发或测试方式、架构说明、模块状态、已知限制或运维说明，请优先维护现有章节；只有现有结构无法表达新事实时，才新增章节。如果本次任务没有改变 README 应记录的当前事实，可以不修改 README。不要追加任务流水账、验收记录或“任务归档记录”章节。不要修改 REVIEW.md。",
     }
 
     return f"""{base}

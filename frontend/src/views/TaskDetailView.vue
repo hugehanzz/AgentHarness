@@ -386,7 +386,7 @@ onMounted(() => {
           </el-button>
           <el-button
             v-if="currentAgentRunType"
-            :icon="Right"
+            :icon="Refresh"
             :loading="currentAgentRunning"
             :disabled="Boolean(flowActionRunning) || currentAgentRunning"
             @click="runCurrentAgent"
