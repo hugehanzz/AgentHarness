@@ -14,8 +14,8 @@ AgentHarness 是一个本地运行、由 Human Supervisor 监督的多 Agent 研
 
 当前真正作为 AgentWorker 登记的只有三个：
 
-- `Codex`：生成计划、执行开发、修复问题、生成验收建议、维护 README 归档文档。
-- `Claude-DeepSeek`：通过 Claude CLI 执行代码评审和复审，并维护被评审业务项目的 `REVIEW.md`。
+- `Codex`：生成计划、执行开发、修复问题、生成验收建议、维护 `README.md` 归档文档。
+- `Claude`：执行代码评审和复审，并维护被评审业务项目的 `REVIEW.md`。
 - `Gemini`：计划中的第三个 agent，定位为 AgentHarness 的“秘书”，负责使用提醒、进度摘要、门禁提示和安全流程推进建议。它不能替代 Human Supervisor 批准计划、依赖、验收或高风险修复。
 
 ## 设计特点
@@ -26,7 +26,7 @@ AgentHarness 的核心设计是把 agent 能力放进一个可控流程，而不
 
 在实现上，AgentHarness 采用控制面 / 数据面分离：本仓库保存任务、状态、提示词和运行证据；Codex / Claude 在用户选择的外部业务项目 `workspace_path` 中完成具体开发和评审。前端的 Agent Prompt 面板会展示将发送给 agent 的完整提示词，并允许用户在匹配当前 run type 时手动调整后重新运行。
 
-Accept 阶段不会直接让用户点“验收通过”。系统会先要求 Codex 生成面向人类的验收建议，例如页面操作、API 调用、命令验证、日志检查和通过/打回标准，再由 Human Supervisor 做最终决定。Archive 阶段则由 Codex 维护 README，让文档记录项目当前事实，而不是沉淀任务流水账。
+Accept 阶段不会直接让用户点“验收通过”。系统会先要求 Codex 生成面向人类的验收建议，例如页面操作、API 调用、命令验证、日志检查和通过/打回标准，再由 Human Supervisor 做最终决定。Archive 阶段则由 Codex 维护 `README.md`，让文档记录项目当前事实，而不是沉淀任务流水账。
 
 ## Agent 接入状态
 
@@ -80,8 +80,8 @@ Bash
 
 - 在任务 `workspace_path` 下启动 Claude。
 - 从 JSON 输出中解析 `session_id`、`uuid`、结果文本和诊断信息。
-- Review / Recheck 复用同一任务的 Claude session。
-- 同一 workspace 下活跃 session 大约每 5 个不同任务轮换一次。
+- Review / Recheck 复用同一任务的 `session`。
+- 同一 workspace 下活跃` session `大约每 5 个不同任务轮换一次。
 - 将 Claude 的评审结论展示在 Agent Runs 中，并把权限、退出原因、模型使用等信息放入 Diagnostics。
 
 当前 Claude run type：
@@ -197,7 +197,7 @@ Agent Runs 刷新规则：
 后端启动时只会创建或更新三个 worker：
 
 - Codex
-- Claude-DeepSeek
+- Claude
 - Gemini
 
 如果旧数据库里还有早期实验留下的 worker 行，需要人工按需清理。
@@ -226,9 +226,7 @@ Prompt preview 是无状态的：根据当前任务和 prompt 类型实时生成
 
 `REVIEW.md` 属于被评审的外部业务项目。Codex 可以读取和解析它，但不负责维护它。Claude-DeepSeek 负责评审和复审记录。
 
-README 归档由 Codex 负责，因为 Codex 是实际开发者。Archive 阶段的目标是让 README 反映项目当前事实状态，而不是追加任务流水账。如果某次任务没有改变 README 应记录的当前事实，Codex 可以不修改 README。
-
-Archive checker 是归档辅助检查服务，用于检查 root、frontend、backend、app、database 等位置的 README 覆盖情况。它不修改 `REVIEW.md`。
+`README.md` 归档由 Codex 负责，因为 Codex 是实际开发者。Archive 阶段的目标是让 `README.md` 反映项目当前事实状态，而不是追加任务流水账。如果某次任务没有改变 应记录的当前事实，Codex 可以不修改`README.md`。
 
 ## 后端启动
 
