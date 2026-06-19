@@ -1,6 +1,6 @@
 # AgentHarness
 
-AgentHarness 是一个本地运行、由 Human Supervisor 监督的多 Agent 研发工作流控制台。项目目标是把“需求 -> 计划 -> 开发 -> 评审 -> 修复 -> 复审 -> 验收 -> 归档”的研发链路产品化，让 Codex、Claude 等本地 Agent 在可观测、可追溯、可人工介入的流程中协作。
+AgentHarness 是一个本地运行、由 Human Supervisor 监督的多 Agent 研发工作流控制台。项目目标是把“需求 -> 计划 -> 开发 -> [ 评审 -> 修复 -> 复审 ] -> 验收 -> 归档”的研发链路产品化，让 Codex、Claude 等本地 Agent 在可观测、可追溯、可人工介入的流程中协作。
 
 当前版本不直接调用 OpenAI、Claude、DeepSeek 或 Gemini 云端 API，而是通过本机 Codex App Server 和 Claude CLI 接入受控 worker。AgentHarness 负责流程编排、状态机、提示词构建、证据保存、人类门禁和前端操作台；真正的代码生成和评审动作发生在用户选择的业务项目 workspace 中。
 
@@ -20,7 +20,9 @@ AgentHarness 是一个本地运行、由 Human Supervisor 监督的多 Agent 研
 
 ## 设计特点
 
-AgentHarness 的核心设计是把 agent 能力放进一个可控流程，而不是让 agent 直接接管仓库。系统通过状态机约束每一步可以发生的动作，通过 AgentRun 保存输入、输出、诊断和执行状态，通过 Human Supervisor 门禁保留计划确认和最终验收等关键决策。
+AgentHarness 的核心设计是把 agent 能力放进一个可控流程，而不是让 agent 直接接管仓库。
+
+系统通过状态机约束每一步可以发生的动作，通过 AgentRun 保存输入、输出、诊断和执行状态，通过 Human Supervisor 门禁保留计划确认和最终验收等关键决策。
 
 在实现上，AgentHarness 采用控制面 / 数据面分离：本仓库保存任务、状态、提示词和运行证据；Codex / Claude 在用户选择的外部业务项目 `workspace_path` 中完成具体开发和评审。前端的 Agent Prompt 面板会展示将发送给 agent 的完整提示词，并允许用户在匹配当前 run type 时手动调整后重新运行。
 

@@ -494,7 +494,7 @@ onMounted(() => {
       </section>
 
       <section class="grid detail-main">
-        <div class="grid">
+        <div class="grid detail-sidebar">
           <div class="panel">
             <div class="panel-header">
               <div>
@@ -539,9 +539,10 @@ onMounted(() => {
             @runs-changed="updateAgentRuns"
           />
           <WorkerStatus />
+          <CommandPanel :task-id="taskId" :workspace-path="store.selectedTask.workspace_path" />
         </div>
 
-        <div class="grid">
+        <div class="grid detail-content">
           <PromptPanel
             :task-id="taskId"
             :current-status="store.selectedTask.status"
@@ -550,7 +551,6 @@ onMounted(() => {
             @prompt-changed="updateAgentPromptDraft"
           />
           <ReviewPanel :task-id="taskId" :workspace-path="store.selectedTask.workspace_path" />
-          <CommandPanel :task-id="taskId" :workspace-path="store.selectedTask.workspace_path" />
           <div class="panel events-panel">
             <div class="panel-header">
               <div>

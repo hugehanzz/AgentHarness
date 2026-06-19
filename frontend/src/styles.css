@@ -603,6 +603,20 @@ body {
 
 .detail-main {
   grid-template-columns: minmax(300px, 390px) minmax(0, 1fr);
+  align-items: stretch;
+}
+
+.detail-sidebar,
+.detail-content {
+  height: 100%;
+}
+
+.detail-sidebar {
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+}
+
+.detail-content {
+  grid-template-rows: auto auto minmax(0, 1fr);
 }
 
 .requirement-text {
@@ -624,10 +638,15 @@ body {
 }
 
 .events-panel {
-  align-self: start;
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  min-height: 0;
 }
 
 .events-scroll {
+  flex: 1;
+  min-height: 320px;
   max-height: min(520px, 58vh);
   overflow-y: auto;
   padding-right: 6px;
@@ -807,6 +826,16 @@ body {
   .page-grid,
   .detail-main {
     grid-template-columns: 1fr;
+  }
+
+  .detail-sidebar,
+  .detail-content {
+    height: auto;
+    grid-template-rows: none;
+  }
+
+  .events-scroll {
+    min-height: 260px;
   }
 
   .topbar {
