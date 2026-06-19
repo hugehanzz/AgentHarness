@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session
 
-from app.api import acceptance, agent_runs, archive, commands, filesystem, prompts, reviews, tasks, workers
+from app.api import agent_runs, archive, commands, filesystem, prompts, reviews, tasks, workers
 from app.core.config import get_settings
 from app.core.database import engine, init_db
 from app.scheduler.heartbeat import heartbeat_loop
@@ -46,7 +46,6 @@ app.include_router(reviews.router)
 app.include_router(commands.router)
 app.include_router(filesystem.router)
 app.include_router(workers.router)
-app.include_router(acceptance.router)
 app.include_router(archive.router)
 
 

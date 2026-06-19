@@ -3,7 +3,6 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, Check, Close, Edit, Refresh, Right } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import AcceptancePanel from '../components/AcceptancePanel.vue'
 import AgentRunsPanel from '../components/AgentRunsPanel.vue'
 import CommandPanel from '../components/CommandPanel.vue'
 import PromptPanel from '../components/PromptPanel.vue'
@@ -476,7 +475,6 @@ onMounted(() => {
           </div>
           <AgentRunsPanel :task-id="taskId" :refresh-key="agentRunsRefreshKey" />
           <WorkerStatus />
-          <AcceptancePanel :task-id="taskId" />
         </div>
 
         <div class="grid">
