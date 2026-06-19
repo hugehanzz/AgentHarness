@@ -489,18 +489,20 @@ onMounted(() => {
           />
           <ReviewPanel :task-id="taskId" :workspace-path="store.selectedTask.workspace_path" />
           <CommandPanel :task-id="taskId" :workspace-path="store.selectedTask.workspace_path" />
-          <div class="panel">
+          <div class="panel events-panel">
             <div class="panel-header">
               <div>
                 <h2 class="panel-title">Events</h2>
               </div>
             </div>
-            <el-timeline>
-              <el-timeline-item v-for="event in store.events" :key="event.id" :timestamp="formatTimestamp(event.created_at)">
-                {{ eventTitle(event) }}
-                <div class="muted">{{ event.message }}</div>
-              </el-timeline-item>
-            </el-timeline>
+            <div class="events-scroll">
+              <el-timeline>
+                <el-timeline-item v-for="event in store.events" :key="event.id" :timestamp="formatTimestamp(event.created_at)">
+                  {{ eventTitle(event) }}
+                  <div class="muted">{{ event.message }}</div>
+                </el-timeline-item>
+              </el-timeline>
+            </div>
           </div>
         </div>
       </section>

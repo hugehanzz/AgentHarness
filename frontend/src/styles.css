@@ -623,6 +623,20 @@ body {
   gap: 10px;
 }
 
+.events-panel {
+  align-self: start;
+}
+
+.events-scroll {
+  max-height: min(520px, 58vh);
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.events-scroll .el-timeline {
+  padding-bottom: 2px;
+}
+
 .icon-button {
   border-color: #d9d9d4;
   background: #ffffff;
