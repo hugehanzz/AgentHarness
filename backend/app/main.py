@@ -1,5 +1,5 @@
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,7 +9,6 @@ from app.api import agent_runs, archive, commands, filesystem, prompts, reviews,
 from app.core.config import get_settings
 from app.core.database import engine, init_db
 from app.scheduler.heartbeat import heartbeat_loop
-from app.scheduler.runner import scheduler_loop, stop_task
 from app.scheduler.workers import ensure_workers
 
 
@@ -20,12 +19,12 @@ async def lifespan(app: FastAPI):
         ensure_workers(session)
     stop_event = asyncio.Event()
     heartbeat_task = asyncio.create_task(heartbeat_loop(stop_event))
-    scheduler_task = asyncio.create_task(scheduler_loop(stop_event))
     app.state.stop_event = stop_event
     yield
     stop_event.set()
-    await stop_task(heartbeat_task)
-    await stop_task(scheduler_task)
+    heartbeat_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await heartbeat_task
 
 
 settings = get_settings()
