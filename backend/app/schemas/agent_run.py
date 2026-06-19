@@ -7,6 +7,7 @@ from app.models.worker import RunStatus
 
 class AgentRunCreate(BaseModel):
     run_type: str
+    prompt_override: str | None = None
 
 
 class AgentRunRead(BaseModel):

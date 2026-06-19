@@ -12,3 +12,8 @@ def create_prompt(session: Session, task_id: int, prompt_type: PromptType) -> Pr
     session.commit()
     session.refresh(record)
     return record
+
+
+def preview_prompt(session: Session, task_id: int, prompt_type: PromptType) -> str:
+    task = get_task_or_404(session, task_id)
+    return build_prompt(task, prompt_type)

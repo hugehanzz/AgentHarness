@@ -23,6 +23,7 @@ const requirementDraft = ref('')
 const flowActionRunning = ref<TaskStatus | null>(null)
 const currentAgentRunning = ref(false)
 const agentRunsRefreshKey = ref(0)
+const agentPromptDraft = ref({ promptType: '', content: '', matchesCurrentRun: false })
 
 const statuses: TaskStatus[] = [
   'REQUIREMENT_DRAFT',
@@ -151,6 +152,7 @@ const agentRunByCurrentStatus: Partial<Record<TaskStatus, string>> = {
   REVIEW_REQUESTED: 'claude_review',
   FIXING: 'codex_fix',
   RECHECK_REQUESTED: 'claude_recheck',
+  ACCEPTANCE_READY: 'codex_acceptance_checklist',
   ARCHIVED: 'codex_archive',
 }
 
@@ -160,12 +162,27 @@ const agentRunLabels: Record<string, string> = {
   claude_review: '运行 Claude Review',
   codex_fix: '运行 Codex Fix',
   claude_recheck: '运行 Claude Recheck',
+  codex_acceptance_checklist: '运行 Codex 验收建议',
   codex_archive: '运行 Codex Archive',
+}
+
+const promptTypeByRunType: Record<string, string> = {
+  codex_plan: 'CODEX_PLAN',
+  codex_implement: 'CODEX_IMPLEMENT',
+  claude_review: 'CLAUDE_REVIEW',
+  codex_fix: 'CODEX_FIX',
+  claude_recheck: 'CLAUDE_RECHECK',
+  codex_acceptance_checklist: 'ACCEPTANCE_CHECKLIST',
+  codex_archive: 'README_ARCHIVE',
 }
 
 const currentAgentRunType = computed(() => {
   if (!store.selectedTask) return null
   return agentRunByCurrentStatus[store.selectedTask.status] || null
+})
+
+const currentRunPromptType = computed(() => {
+  return currentAgentRunType.value ? promptTypeByRunType[currentAgentRunType.value] || null : null
 })
 
 function actionLabel(status: TaskStatus) {
@@ -213,24 +230,40 @@ function refreshAgentRuns() {
   agentRunsRefreshKey.value += 1
 }
 
-async function runAgentByType(runType: string) {
-  const { data } = await api.post<AgentRun>(`/tasks/${taskId}/agent-runs`, { run_type: runType })
+async function runAgentByType(runType: string, promptOverride?: string | null) {
   refreshAgentRuns()
-  ElMessage.success(`${runType} finished with ${data.status}`)
+  const payload: { run_type: string; prompt_override?: string } = { run_type: runType }
+  if (promptOverride?.trim()) {
+    payload.prompt_override = promptOverride.trim()
+  }
+  try {
+    const { data } = await api.post<AgentRun>(`/tasks/${taskId}/agent-runs`, payload)
+    ElMessage.success(`${runType} finished with ${data.status}`)
+  } finally {
+    refreshAgentRuns()
+  }
+}
+
+function promptOverrideForRunType(runType: string) {
+  const expectedPromptType = promptTypeByRunType[runType]
+  if (!expectedPromptType) return null
+  if (!agentPromptDraft.value.matchesCurrentRun) return null
+  if (agentPromptDraft.value.promptType !== expectedPromptType) return null
+  return agentPromptDraft.value.content
 }
 
 async function runAgentForTransition(toStatus: TaskStatus) {
   const runType = agentRunByTransition[toStatus]
   if (!runType) return
 
-  await runAgentByType(runType)
+  await runAgentByType(runType, promptOverrideForRunType(runType))
 }
 
 async function runCurrentAgent() {
   if (!currentAgentRunType.value) return
   currentAgentRunning.value = true
   try {
-    await runAgentByType(currentAgentRunType.value)
+    await runAgentByType(currentAgentRunType.value, promptOverrideForRunType(currentAgentRunType.value))
   } catch (error: any) {
     ElMessage.error(error?.response?.data?.detail || error?.message || 'Agent run failed')
   } finally {
@@ -238,7 +271,12 @@ async function runCurrentAgent() {
   }
 }
 
+function updateAgentPromptDraft(payload: { promptType: string; content: string; matchesCurrentRun: boolean }) {
+  agentPromptDraft.value = payload
+}
+
 async function transition(toStatus: TaskStatus) {
+  refreshAgentRuns()
   flowActionRunning.value = toStatus
   const previousStatus = store.selectedTask?.status
   try {
@@ -442,7 +480,13 @@ onMounted(() => {
         </div>
 
         <div class="grid">
-          <PromptPanel :task-id="taskId" :current-status="store.selectedTask.status" />
+          <PromptPanel
+            :task-id="taskId"
+            :current-status="store.selectedTask.status"
+            :task-updated-at="store.selectedTask.updated_at"
+            :current-run-prompt-type="currentRunPromptType"
+            @prompt-changed="updateAgentPromptDraft"
+          />
           <ReviewPanel :task-id="taskId" :workspace-path="store.selectedTask.workspace_path" />
           <CommandPanel :task-id="taskId" :workspace-path="store.selectedTask.workspace_path" />
           <div class="panel">

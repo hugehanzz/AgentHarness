@@ -96,6 +96,48 @@ def test_run_local_agent_records_cli_output(monkeypatch, tmp_path):
         assert event.event_type == "AGENT_RUN_COMPLETED"
 
 
+def test_run_local_agent_uses_prompt_override(monkeypatch, tmp_path):
+    engine = create_engine("sqlite:///:memory:")
+    SQLModel.metadata.create_all(engine)
+    monkeypatch.setattr(
+        agent_run_service,
+        "get_settings",
+        lambda: SimpleNamespace(agent_claude_command="claude", agent_timeout_seconds=5),
+    )
+
+    def fake_run(command, **kwargs):
+        assert kwargs["input"] == "custom review prompt"
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "type": "result",
+                    "subtype": "success",
+                    "is_error": False,
+                    "result": "review ready",
+                    "session_id": "claude-session-1",
+                    "uuid": "turn-1",
+                    "permission_denials": [],
+                }
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(agent_run_service.subprocess, "run", fake_run)
+
+    with Session(engine) as session:
+        ensure_workers(session)
+        task = create_task(
+            session,
+            TaskCreate(title="Review task", description="Requirement", workspace_path=str(tmp_path)),
+        )
+
+        run = asyncio.run(run_local_agent(session, task.id, "claude_review", "custom review prompt"))
+
+        assert run.status == RunStatus.SUCCEEDED
+        assert run.input_payload == "custom review prompt"
+
+
 def test_claude_recheck_reuses_task_session_without_incrementing(monkeypatch, tmp_path):
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
@@ -314,6 +356,104 @@ def test_codex_run_reuses_latest_thread(monkeypatch, tmp_path):
         assert FakeCodexAppServerProcess.received_thread_id == "thread-existing"
         assert run.external_thread_id == "thread-existing"
         assert run.external_turn_id == "turn-2"
+
+
+def test_codex_run_uses_prompt_override(monkeypatch, tmp_path):
+    engine = create_engine("sqlite:///:memory:")
+    SQLModel.metadata.create_all(engine)
+    monkeypatch.setattr(
+        agent_run_service,
+        "get_settings",
+        lambda: SimpleNamespace(codex_app_server_command="codex app-server", agent_timeout_seconds=5),
+    )
+
+    class FakeCodexAppServerProcess:
+        received_prompt = None
+
+        @classmethod
+        async def start(cls, command, cwd):
+            return cls()
+
+        async def run_turn(self, prompt, cwd, thread_id, run_type):
+            FakeCodexAppServerProcess.received_prompt = prompt
+            return {
+                "thread_id": "thread-override",
+                "turn_id": "turn-override",
+                "agent_text": "override ready",
+                "diagnostics": None,
+                "completed": True,
+            }
+
+        async def stop(self):
+            pass
+
+    monkeypatch.setattr(agent_run_service, "CodexAppServerProcess", FakeCodexAppServerProcess)
+
+    with Session(engine) as session:
+        ensure_workers(session)
+        task = create_task(
+            session,
+            TaskCreate(title="Override task", description="Requirement", workspace_path=str(tmp_path)),
+        )
+
+        run = asyncio.run(run_agent(session, task.id, "codex_implement", "  custom prompt  "))
+
+        assert run.status == RunStatus.SUCCEEDED
+        assert run.input_payload == "custom prompt"
+        assert FakeCodexAppServerProcess.received_prompt == "custom prompt"
+
+
+def test_codex_acceptance_checklist_run_uses_acceptance_prompt(monkeypatch, tmp_path):
+    engine = create_engine("sqlite:///:memory:")
+    SQLModel.metadata.create_all(engine)
+    monkeypatch.setattr(
+        agent_run_service,
+        "get_settings",
+        lambda: SimpleNamespace(codex_app_server_command="codex app-server", agent_timeout_seconds=5),
+    )
+
+    class FakeCodexAppServerProcess:
+        received_prompt = None
+        received_run_type = None
+
+        @classmethod
+        async def start(cls, command, cwd):
+            return cls()
+
+        async def run_turn(self, prompt, cwd, thread_id, run_type):
+            FakeCodexAppServerProcess.received_prompt = prompt
+            FakeCodexAppServerProcess.received_run_type = run_type
+            return {
+                "thread_id": "thread-acceptance",
+                "turn_id": "turn-acceptance",
+                "agent_text": "验收建议",
+                "diagnostics": None,
+                "completed": True,
+            }
+
+        async def stop(self):
+            pass
+
+    monkeypatch.setattr(agent_run_service, "CodexAppServerProcess", FakeCodexAppServerProcess)
+
+    with Session(engine) as session:
+        ensure_workers(session)
+        task = create_task(
+            session,
+            TaskCreate(title="Acceptance task", description="Requirement", workspace_path=str(tmp_path)),
+        )
+
+        run = asyncio.run(run_agent(session, task.id, "codex_acceptance_checklist"))
+
+        assert run.status == RunStatus.SUCCEEDED
+        assert run.provider_type == "codex_app_server"
+        assert run.output_payload == "验收建议"
+        assert FakeCodexAppServerProcess.received_run_type == "codex_acceptance_checklist"
+        assert FakeCodexAppServerProcess.received_prompt
+        assert "Human Supervisor" in FakeCodexAppServerProcess.received_prompt
+        assert "Apifox" in FakeCodexAppServerProcess.received_prompt
+        saved_items = session.exec(select(AgentRun).where(AgentRun.task_id == task.id)).all()
+        assert len(saved_items) == 1
 
 
 def test_codex_archive_run_records_archive_check(monkeypatch, tmp_path):

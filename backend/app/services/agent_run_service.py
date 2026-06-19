@@ -25,6 +25,7 @@ CODEX_APP_SERVER_RUN_TYPES = {
     "codex_plan": PromptType.CODEX_PLAN,
     "codex_implement": PromptType.CODEX_IMPLEMENT,
     "codex_fix": PromptType.CODEX_FIX,
+    "codex_acceptance_checklist": PromptType.ACCEPTANCE_CHECKLIST,
     "codex_archive": PromptType.README_ARCHIVE,
 }
 
@@ -148,13 +149,24 @@ def list_agent_runs(session: Session, task_id: int) -> list[AgentRun]:
     )
 
 
-async def run_agent(session: Session, task_id: int, run_type: str) -> AgentRun:
+def resolve_prompt(task: Any, prompt_type: PromptType, prompt_override: str | None) -> str:
+    if prompt_override and prompt_override.strip():
+        return prompt_override.strip()
+    return build_prompt(task, prompt_type)
+
+
+async def run_agent(session: Session, task_id: int, run_type: str, prompt_override: str | None = None) -> AgentRun:
     if run_type in CODEX_APP_SERVER_RUN_TYPES:
-        return await run_codex_app_server_agent(session, task_id, run_type)
-    return await run_local_agent(session, task_id, run_type)
+        return await run_codex_app_server_agent(session, task_id, run_type, prompt_override)
+    return await run_local_agent(session, task_id, run_type, prompt_override)
 
 
-async def run_codex_app_server_agent(session: Session, task_id: int, run_type: str) -> AgentRun:
+async def run_codex_app_server_agent(
+    session: Session,
+    task_id: int,
+    run_type: str,
+    prompt_override: str | None = None,
+) -> AgentRun:
     if run_type not in CODEX_APP_SERVER_RUN_TYPES:
         raise HTTPException(status_code=400, detail="Codex run type is not registered")
 
@@ -172,7 +184,7 @@ async def run_codex_app_server_agent(session: Session, task_id: int, run_type: s
         raise HTTPException(status_code=400, detail="CODEX_APP_SERVER_COMMAND is empty")
 
     worker = session.exec(select(AgentWorker).where(AgentWorker.name == "Codex")).first()
-    prompt = build_prompt(task, CODEX_APP_SERVER_RUN_TYPES[run_type])
+    prompt = resolve_prompt(task, CODEX_APP_SERVER_RUN_TYPES[run_type], prompt_override)
     existing_thread_id = get_latest_codex_thread_id(session, task.id)
     now = app_now()
     record = AgentRun(
@@ -259,7 +271,12 @@ def append_diagnostic_payload(existing: str | None, payload: dict[str, Any]) -> 
     return rendered
 
 
-async def run_local_agent(session: Session, task_id: int, run_type: str) -> AgentRun:
+async def run_local_agent(
+    session: Session,
+    task_id: int,
+    run_type: str,
+    prompt_override: str | None = None,
+) -> AgentRun:
     if run_type not in LOCAL_CLI_RUN_DEFINITIONS:
         raise HTTPException(status_code=400, detail="Agent run type is not registered")
 
@@ -286,7 +303,7 @@ async def run_local_agent(session: Session, task_id: int, run_type: str) -> Agen
 
     worker = session.exec(select(AgentWorker).where(AgentWorker.name == definition["worker_name"])).first()
     prompt_type = PromptType(definition["prompt_type"])
-    prompt = build_prompt(task, prompt_type)
+    prompt = resolve_prompt(task, prompt_type, prompt_override)
     claude_session = get_or_create_claude_session(session, task.id, str(cwd))
     resume_session_id = claude_session.external_session_id
     task_should_be_counted = should_count_task_for_session(session, claude_session.id, task.id)
@@ -497,7 +514,8 @@ class CodexAppServerProcess:
                 await asyncio.to_thread(self.proc.wait)
 
     async def run_turn(self, prompt: str, cwd: str, thread_id: str | None, run_type: str) -> dict[str, Any]:
-        sandbox = "read-only" if run_type == "codex_plan" else "workspace-write"
+        read_only_run_types = {"codex_plan", "codex_acceptance_checklist"}
+        sandbox = "read-only" if run_type in read_only_run_types else "workspace-write"
         async with await self.connect() as ws:
             await self.request(
                 ws,

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Refresh } from '@element-plus/icons-vue'
 import { api } from '../api/client'
 import type { AgentRun } from '../api/types'
@@ -10,12 +10,17 @@ const runs = ref<AgentRun[]>([])
 const openDiagnostics = ref<string[]>([])
 
 const latestRun = computed(() => runs.value[0] || null)
+const latestRunIsRunning = computed(() => latestRun.value?.status === 'RUNNING')
 const latestDiagnostics = computed(() => latestRun.value?.stderr || latestRun.value?.error_message || '')
 const diagnosticsLabel = computed(() => {
   if (!latestRun.value?.error_message) return 'Diagnostics'
   return 'Diagnostics · error'
 })
 const openRunDetails = ref<string[]>([])
+const pollIntervalMs = 5000
+const maxPollingMs = 10 * 60 * 1000
+let pollTimer: ReturnType<typeof window.setInterval> | null = null
+let pollStartedAt = 0
 
 const runTypeLabels: Record<string, string> = {
   codex_plan: 'Codex 生成计划',
@@ -23,6 +28,7 @@ const runTypeLabels: Record<string, string> = {
   claude_review: 'Claude 代码评审',
   codex_fix: 'Codex 修复问题',
   claude_recheck: 'Claude 复审结果',
+  codex_acceptance_checklist: 'Codex 生成验收建议',
   codex_archive: 'Codex README 归档',
 }
 
@@ -52,7 +58,28 @@ async function loadRuns() {
   runs.value = data
 }
 
+function stopPolling() {
+  if (!pollTimer) return
+  window.clearInterval(pollTimer)
+  pollTimer = null
+  pollStartedAt = 0
+}
+
+function startPolling() {
+  if (pollTimer) return
+  pollStartedAt = Date.now()
+  pollTimer = window.setInterval(() => {
+    if (Date.now() - pollStartedAt >= maxPollingMs) {
+      stopPolling()
+      return
+    }
+    loadRuns()
+  }, pollIntervalMs)
+}
+
 onMounted(loadRuns)
+
+onBeforeUnmount(stopPolling)
 
 watch(
   () => props.refreshKey,
@@ -66,6 +93,17 @@ watch(
   () => {
     openDiagnostics.value = []
     openRunDetails.value = []
+  },
+)
+
+watch(
+  latestRunIsRunning,
+  (isRunning) => {
+    if (isRunning) {
+      startPolling()
+    } else {
+      stopPolling()
+    }
   },
 )
 </script>

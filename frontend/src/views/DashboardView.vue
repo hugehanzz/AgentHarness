@@ -14,6 +14,8 @@ const folderPickerVisible = ref(false)
 const creatingTask = ref(false)
 const taskPage = ref(1)
 const taskPageSize = 8
+const lastWorkspacePathKey = 'agentharness:lastWorkspacePath'
+const lastWorkspacePath = ref(localStorage.getItem(lastWorkspacePathKey) || '')
 const form = reactive({
   title: '',
   description: '',
@@ -22,13 +24,18 @@ const form = reactive({
 
 async function createTask() {
   if (!form.title.trim() || !form.description.trim()) return
+  const workspacePath = form.workspace_path.trim() || lastWorkspacePath.value.trim()
   creatingTask.value = true
   try {
     await store.createTask({
       title: form.title,
       description: form.description,
-      workspace_path: form.workspace_path || undefined,
+      workspace_path: workspacePath || undefined,
     })
+    if (workspacePath) {
+      localStorage.setItem(lastWorkspacePathKey, workspacePath)
+      lastWorkspacePath.value = workspacePath
+    }
     ElMessage.success('Workflow created')
     form.title = ''
     form.description = ''
@@ -130,7 +137,7 @@ onMounted(() => {
               <el-input v-model="form.title" placeholder="例如：员工请假审批流程优化" />
             </el-form-item>
             <el-form-item label="Workspace Path">
-              <el-input v-model="form.workspace_path" placeholder="D:\project\workspace">
+              <el-input v-model="form.workspace_path" :placeholder="lastWorkspacePath || 'D:\\project\\workspace'">
                 <template #append>
                   <el-button class="folder-trigger" :icon="FolderOpened" @click="folderPickerVisible = true" />
                 </template>

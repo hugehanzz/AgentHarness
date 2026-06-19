@@ -15,4 +15,4 @@ def list_for_task(task_id: int, session: Session = Depends(get_session)):
 
 @router.post("", response_model=AgentRunRead)
 async def run(task_id: int, payload: AgentRunCreate, session: Session = Depends(get_session)):
-    return await run_agent(session, task_id, payload.run_type)
+    return await run_agent(session, task_id, payload.run_type, payload.prompt_override)

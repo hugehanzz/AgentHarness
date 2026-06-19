@@ -15,3 +15,9 @@ class PromptRead(BaseModel):
     prompt_type: PromptType
     content: str
     created_at: datetime
+
+
+class PromptPreviewRead(BaseModel):
+    task_id: int
+    prompt_type: PromptType
+    content: str
