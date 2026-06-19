@@ -15,6 +15,7 @@ def init_db() -> None:
     SQLModel.metadata.create_all(engine)
     ensure_task_text_columns()
     ensure_agent_run_columns()
+    ensure_command_run_columns()
     ensure_agent_worker_role_column()
     cleanup_stale_agent_workers()
 
@@ -83,6 +84,27 @@ def ensure_agent_run_columns() -> None:
                 connection.execute(text(f"ALTER TABLE agentrun MODIFY COLUMN {name} TEXT NULL"))
             else:
                 connection.execute(text(f"ALTER TABLE agentrun ALTER COLUMN {name} TYPE TEXT"))
+
+
+def ensure_command_run_columns() -> None:
+    inspector = inspect(engine)
+    if not inspector.has_table("commandrun"):
+        return
+
+    dialect = engine.dialect.name
+    if dialect == "sqlite":
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("commandrun")}
+    text_columns = ["stdout", "stderr"]
+    with engine.begin() as connection:
+        for name in text_columns:
+            if name not in existing_columns:
+                continue
+            if dialect == "mysql":
+                connection.execute(text(f"ALTER TABLE commandrun MODIFY COLUMN {name} TEXT NULL"))
+            else:
+                connection.execute(text(f"ALTER TABLE commandrun ALTER COLUMN {name} TYPE TEXT"))
 
 
 def ensure_agent_worker_role_column() -> None:

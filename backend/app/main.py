@@ -1,4 +1,5 @@
 import asyncio
+import sys
 from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
@@ -10,6 +11,10 @@ from app.core.config import get_settings
 from app.core.database import engine, init_db
 from app.scheduler.heartbeat import heartbeat_loop
 from app.scheduler.workers import ensure_workers
+
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 
 @asynccontextmanager

@@ -1,4 +1,6 @@
 import asyncio
+import os
+import subprocess
 import time
 from pathlib import Path
 
@@ -37,21 +39,34 @@ async def run_safe_command(session: Session, command_key: str, workspace_path: s
 
     start = time.perf_counter()
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *command,
-            cwd=str(cwd),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        result = await run_registered_command(command, cwd)
+        record.exit_code = result.returncode
+        record.stdout = result.stdout
+        record.stderr = result.stderr
+        record.status = CommandStatus.SUCCEEDED if result.returncode == 0 else CommandStatus.FAILED
+    except FileNotFoundError:
+        record.status = CommandStatus.FAILED
+        record.exit_code = None
+        executable = command[0]
+        record.stderr = (
+            f"Executable not found: {executable}. "
+            "Ensure the backend process is started with this executable on PATH."
         )
-        stdout_bytes, stderr_bytes = await asyncio.wait_for(
-            proc.communicate(),
-            timeout=get_settings().command_timeout_seconds,
+    except OSError as exc:
+        record.status = CommandStatus.FAILED
+        record.exit_code = None
+        record.stderr = f"Failed to start command on {os.name}: {exc}"
+    except NotImplementedError:
+        record.status = CommandStatus.FAILED
+        record.exit_code = None
+        record.stderr = (
+            "Current asyncio event loop does not support subprocess execution. "
+            "On Windows, start the backend with a Proactor event loop."
         )
-        record.exit_code = proc.returncode
-        record.stdout = stdout_bytes.decode("utf-8", errors="replace")
-        record.stderr = stderr_bytes.decode("utf-8", errors="replace")
-        record.status = CommandStatus.SUCCEEDED if proc.returncode == 0 else CommandStatus.FAILED
     except TimeoutError:
+        record.status = CommandStatus.TIMED_OUT
+        record.stderr = "Command timed out"
+    except subprocess.TimeoutExpired:
         record.status = CommandStatus.TIMED_OUT
         record.stderr = "Command timed out"
     finally:
@@ -60,3 +75,42 @@ async def run_safe_command(session: Session, command_key: str, workspace_path: s
         session.commit()
         session.refresh(record)
     return record
+
+
+async def run_registered_command(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+    try:
+        return await run_registered_command_async(command, cwd)
+    except NotImplementedError:
+        return await asyncio.to_thread(run_registered_command_sync, command, cwd)
+
+
+async def run_registered_command_async(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+    proc = await asyncio.create_subprocess_exec(
+        *command,
+        cwd=str(cwd),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout_bytes, stderr_bytes = await asyncio.wait_for(
+        proc.communicate(),
+        timeout=get_settings().command_timeout_seconds,
+    )
+    return subprocess.CompletedProcess(
+        args=command,
+        returncode=proc.returncode or 0,
+        stdout=stdout_bytes.decode("utf-8", errors="replace"),
+        stderr=stderr_bytes.decode("utf-8", errors="replace"),
+    )
+
+
+def run_registered_command_sync(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        command,
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=get_settings().command_timeout_seconds,
+        check=False,
+    )
