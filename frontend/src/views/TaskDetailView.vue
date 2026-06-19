@@ -22,6 +22,7 @@ const requirementDraft = ref('')
 const flowActionRunning = ref<TaskStatus | null>(null)
 const currentAgentRunning = ref(false)
 const agentRunsRefreshKey = ref(0)
+const agentRuns = ref<AgentRun[]>([])
 const agentPromptDraft = ref({ promptType: '', content: '', matchesCurrentRun: false })
 
 const statuses: TaskStatus[] = [
@@ -83,12 +84,25 @@ const activeStageIndex = computed(() => {
 
 const nextStatuses = computed(() => {
   if (!store.selectedTask) return []
-  return nextStatusMap[store.selectedTask.status] || []
+  const statuses = nextStatusMap[store.selectedTask.status] || []
+  if (store.selectedTask.status === 'RECHECK_DONE') {
+    return ['ACCEPTANCE_READY', 'FIX_REQUIRED'] as TaskStatus[]
+  }
+  if (store.selectedTask.status === 'ACCEPTANCE_READY' && !hasSuccessfulAcceptanceChecklist.value) {
+    return []
+  }
+  return statuses
 })
 
 const requirementChanged = computed(() => {
   return requirementDraft.value.trim() !== (store.selectedTask?.description || '').trim()
 })
+
+const hasSuccessfulAcceptanceChecklist = computed(() =>
+  agentRuns.value.some(
+    (run) => run.run_type === 'codex_acceptance_checklist' && run.status === 'SUCCEEDED',
+  ),
+)
 
 const actionLabels: Partial<Record<TaskStatus, string>> = {
   PLAN_REQUESTED: '请求计划',
@@ -180,6 +194,13 @@ const currentAgentRunType = computed(() => {
   return agentRunByCurrentStatus[store.selectedTask.status] || null
 })
 
+const currentAgentButtonIcon = computed(() => {
+  if (currentAgentRunType.value === 'codex_acceptance_checklist') {
+    return hasSuccessfulAcceptanceChecklist.value ? Refresh : Right
+  }
+  return Refresh
+})
+
 const currentRunPromptType = computed(() => {
   return currentAgentRunType.value ? promptTypeByRunType[currentAgentRunType.value] || null : null
 })
@@ -214,6 +235,33 @@ function stageState(stageIndex: number) {
   if (!store.selectedTask) return ''
   if (activeStageIndex.value === stageIndex) return 'is-active'
   if (activeStageIndex.value > stageIndex) return 'is-done'
+  return ''
+}
+
+function flowButtonType(status: TaskStatus) {
+  if (store.selectedTask?.status === 'RECHECK_DONE' && status === 'FIX_REQUIRED') return 'default'
+  return 'primary'
+}
+
+function flowButtonIcon(status: TaskStatus) {
+  if (store.selectedTask?.status === 'RECHECK_DONE' && status === 'FIX_REQUIRED') return Refresh
+  if (status === 'ACCEPTANCE_PASSED') return Check
+  return Right
+}
+
+function flowButtonDisabled(status: TaskStatus) {
+  if (flowActionRunning.value) return true
+  return false
+}
+
+function flowButtonTooltip(status: TaskStatus) {
+  if (
+    store.selectedTask?.status === 'ACCEPTANCE_READY'
+    && status === 'ACCEPTANCE_PASSED'
+    && !hasSuccessfulAcceptanceChecklist.value
+  ) {
+    return '请先运行 Codex 验收建议'
+  }
   return ''
 }
 
@@ -272,6 +320,10 @@ async function runCurrentAgent() {
 
 function updateAgentPromptDraft(payload: { promptType: string; content: string; matchesCurrentRun: boolean }) {
   agentPromptDraft.value = payload
+}
+
+function updateAgentRuns(runs: AgentRun[]) {
+  agentRuns.value = runs
 }
 
 async function transition(toStatus: TaskStatus) {
@@ -410,20 +462,28 @@ onMounted(() => {
         </div>
 
         <div class="copy-row" style="margin-top: 16px;">
-          <el-button
+          <el-tooltip
             v-for="status in nextStatuses"
             :key="status"
-            type="primary"
-            :icon="status === 'ACCEPTANCE_PASSED' ? Check : Right"
-            :loading="flowActionRunning === status"
-            :disabled="Boolean(flowActionRunning)"
-            @click="transition(status)"
+            :content="flowButtonTooltip(status)"
+            :disabled="!flowButtonTooltip(status)"
+            placement="top"
           >
-            {{ actionLabel(status) }}
-          </el-button>
+            <span>
+              <el-button
+                :type="flowButtonType(status)"
+                :icon="flowButtonIcon(status)"
+                :loading="flowActionRunning === status"
+                :disabled="flowButtonDisabled(status)"
+                @click="transition(status)"
+              >
+                {{ actionLabel(status) }}
+              </el-button>
+            </span>
+          </el-tooltip>
           <el-button
             v-if="currentAgentRunType"
-            :icon="Refresh"
+            :icon="currentAgentButtonIcon"
             :loading="currentAgentRunning"
             :disabled="Boolean(flowActionRunning) || currentAgentRunning"
             @click="runCurrentAgent"
@@ -473,7 +533,11 @@ onMounted(() => {
               </div>
             </div>
           </div>
-          <AgentRunsPanel :task-id="taskId" :refresh-key="agentRunsRefreshKey" />
+          <AgentRunsPanel
+            :task-id="taskId"
+            :refresh-key="agentRunsRefreshKey"
+            @runs-changed="updateAgentRuns"
+          />
           <WorkerStatus />
         </div>
 

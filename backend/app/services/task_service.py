@@ -4,6 +4,7 @@ from sqlmodel import Session, select
 from app.core.state_machine import TaskStatus, can_transition
 from app.models.common import app_now
 from app.models.task import Task, TaskEvent
+from app.models.worker import AgentRun, RunStatus
 from app.schemas.task import TaskCreate
 
 
@@ -39,11 +40,30 @@ def get_task_events(session: Session, task_id: int) -> list[TaskEvent]:
     return list(session.exec(select(TaskEvent).where(TaskEvent.task_id == task_id).order_by(TaskEvent.created_at)).all())
 
 
+def has_successful_acceptance_checklist(session: Session, task_id: int) -> bool:
+    run = session.exec(
+        select(AgentRun)
+        .where(
+            AgentRun.task_id == task_id,
+            AgentRun.run_type == "codex_acceptance_checklist",
+            AgentRun.status == RunStatus.SUCCEEDED,
+        )
+        .order_by(AgentRun.created_at.desc())
+    ).first()
+    return run is not None
+
+
 def transition_task(session: Session, task_id: int, to_status: TaskStatus, message: str | None, created_by: str) -> Task:
     task = get_task_or_404(session, task_id)
     from_status = task.status
     if not can_transition(from_status, to_status):
         raise HTTPException(status_code=400, detail=f"Invalid transition: {from_status} -> {to_status}")
+    if (
+        from_status == TaskStatus.ACCEPTANCE_READY
+        and to_status == TaskStatus.ACCEPTANCE_PASSED
+        and not has_successful_acceptance_checklist(session, task.id)
+    ):
+        raise HTTPException(status_code=400, detail="Codex acceptance checklist must succeed before acceptance can pass")
     task.status = to_status
     task.updated_at = app_now()
     if to_status == TaskStatus.ARCHIVED:

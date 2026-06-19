@@ -5,6 +5,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 import app.models  # noqa: F401
 from app.core.state_machine import TaskStatus
 from app.models.task import TaskEvent
+from app.models.worker import AgentRun, RunStatus
 from app.schemas.task import TaskCreate
 from app.services.task_service import create_task, transition_task, update_task_requirement
 
@@ -45,3 +46,41 @@ def test_update_task_requirement_rejects_empty_description():
             update_task_requirement(session, task.id, "   ", "tester")
 
         assert exc_info.value.status_code == 400
+
+
+def test_acceptance_pass_requires_successful_codex_checklist():
+    engine = create_engine("sqlite:///:memory:")
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        task = create_task(session, TaskCreate(title="Accept task", description="Requirement"))
+        task.status = TaskStatus.ACCEPTANCE_READY
+        session.add(task)
+        session.commit()
+
+        with pytest.raises(HTTPException) as exc_info:
+            transition_task(session, task.id, TaskStatus.ACCEPTANCE_PASSED, "accept", "tester")
+
+        assert exc_info.value.status_code == 400
+        assert "acceptance checklist" in exc_info.value.detail
+
+
+def test_acceptance_pass_allows_successful_codex_checklist():
+    engine = create_engine("sqlite:///:memory:")
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        task = create_task(session, TaskCreate(title="Accept task", description="Requirement"))
+        task.status = TaskStatus.ACCEPTANCE_READY
+        session.add(task)
+        session.add(
+            AgentRun(
+                task_id=task.id,
+                run_type="codex_acceptance_checklist",
+                provider_type="codex_app_server",
+                status=RunStatus.SUCCEEDED,
+            )
+        )
+        session.commit()
+
+        updated = transition_task(session, task.id, TaskStatus.ACCEPTANCE_PASSED, "accept", "tester")
+
+        assert updated.status == TaskStatus.ACCEPTANCE_PASSED

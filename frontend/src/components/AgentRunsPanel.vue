@@ -5,6 +5,9 @@ import { api } from '../api/client'
 import type { AgentRun } from '../api/types'
 
 const props = defineProps<{ taskId: number; refreshKey: number }>()
+const emit = defineEmits<{
+  runsChanged: [runs: AgentRun[]]
+}>()
 
 const runs = ref<AgentRun[]>([])
 const openDiagnostics = ref<string[]>([])
@@ -56,6 +59,7 @@ function tagType(status: AgentRun['status']) {
 async function loadRuns() {
   const { data } = await api.get<AgentRun[]>(`/tasks/${props.taskId}/agent-runs`)
   runs.value = data
+  emit('runsChanged', data)
 }
 
 function stopPolling() {
