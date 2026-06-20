@@ -5,6 +5,7 @@ import { FolderOpened, List, Plus, Refresh, Share, UserFilled } from '@element-p
 import { ElMessage } from 'element-plus'
 import FolderPickerDialog from '../components/FolderPickerDialog.vue'
 import WorkerStatus from '../components/WorkerStatus.vue'
+import agentHarnessLogo from '../assets/agentharness-logo.png'
 import { useTasksStore } from '../stores/tasks'
 import type { TaskStatus } from '../api/types'
 
@@ -105,10 +106,7 @@ onMounted(() => {
   <div class="layout">
     <header class="topbar">
       <div class="brand-block">
-        <div class="brand-mark" aria-hidden="true">
-          <span></span>
-          <span></span>
-        </div>
+        <img class="brand-mark" :src="agentHarnessLogo" alt="" aria-hidden="true">
         <div>
           <div class="brand">AgentHarness</div>
           <div class="brand-subtitle">Human-supervised agent workflow</div>
