@@ -181,6 +181,33 @@ Agent Runs 刷新规则：
 - 如果用户不选择新路径，会默认使用上一次路径。
 - placeholder 也显示上一次路径。
 
+## Gemini Agent Roadmap
+
+Gemini 会分阶段从系统秘书升级为流程协调员，核心原则是：Gemini 读取后端提供的事实，可以总结和提出动作建议，但不能直接修改状态机，也不能绕过 Human Supervisor gate。
+
+### Stage 1: Secretary Mode
+
+- 后端从任务状态、事件、AgentRun、ReviewItem、CommandRun、gate 和允许流转中构建只读事实包。
+- Gemini 基于事实包总结当前进度、解释当前 gate、提示风险并建议下一步。
+- Gemini 不修改任务状态、不触发 worker run、不批准计划、不批准验收。
+
+### Stage 2: Action Proposal Mode
+
+- Gemini 可以输出结构化动作建议，例如 `REQUEST_REVIEW`、`REQUEST_RECHECK`、`START_ARCHIVE`。
+- 动作建议只是 proposal，不是执行权限。
+- 计划确认和最终验收始终属于 Human Supervisor。
+
+### Stage 3: Policy-Checked Execution
+
+- 后端根据状态机、当前事实、允许流转和 human gate 规则校验 Gemini proposal。
+- Gemini 永远不直接写状态机。
+- 被拒绝的 proposal 应该能向用户解释原因。
+
+### Stage 4: Auto Scheduling
+
+- 低风险且通过 policy 校验的动作可以自动执行，例如实现完成后请求 review、修复完成后请求 recheck、验收通过后触发 archive。
+- 高风险动作、依赖安装、外部业务项目修改决策、计划确认和验收通过仍由 Human Supervisor 控制。
+
 ## 后端服务
 
 当前主要 API：
@@ -188,6 +215,7 @@ Agent Runs 刷新规则：
 - `/tasks`：创建、列表、详情、状态流转、更新需求。
 - `/tasks/{task_id}/agent-runs`：查看和启动 AgentRun。
 - `/tasks/{task_id}/prompts/preview`：预览将发送给 agent 的提示词。
+- `/gemini/tasks/{task_id}/facts`：为 Gemini Secretary 构建只读任务事实包。
 - `/reviews`：读取并解析 workspace 中的 `REVIEW.md`。
 - `/commands`：运行已注册安全命令。
 - `/filesystem`：选择 workspace 路径。
@@ -305,8 +333,8 @@ npm run build
 
 ## 当前限制
 
-- Gemini 目前只是 planned worker，尚未实际接入。
-- 依赖本机 Codex / Claude CLI，不直接调用模型厂商 API。
+- Gemini 已具备 API 连通性验证和只读 task facts 构建能力，但尚未接入前端 Secretary UI，也尚未具备自动调度权限。
+- Codex / Claude 仍依赖本机 Codex App Server 和 Claude CLI；Gemini 通过受控后端服务调用，不能绕过后端 policy 或 Human Supervisor gate。
 - Human Supervisor 门禁保持人工决策。
 - Safe Commands 只允许白名单命令。
 - 旧数据库可能仍有历史 worker 行或空遗留表，需要人工清理。
