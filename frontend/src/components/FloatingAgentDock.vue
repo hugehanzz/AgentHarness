@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ArrowUp, Refresh } from '@element-plus/icons-vue'
 import claudeIcon from '../assets/agent-icons/claudecode-color.png'
@@ -42,6 +42,23 @@ type HomeGeminiMessage = {
   text: string
 }
 
+type ChatMessage = {
+  id: number
+  role: 'user' | 'assistant'
+  text: string
+  status?: 'streaming' | 'done' | 'failed'
+}
+
+type GeminiChatHistoryItem = {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+type SsePayload = {
+  event: string
+  data: Record<string, any>
+}
+
 const storageKey = 'agentharness.floatingAgentPositions.v3'
 const iconSize = 64
 const iconGap = 10
@@ -49,6 +66,7 @@ const safeDistance = iconSize + iconGap
 const viewportPadding = 14
 const clickMoveTolerance = 4
 const fallbackGeminiModel = 'gemini-3.1-flash-lite'
+const renderDeltaDelayMs = 24
 const route = useRoute()
 const store = useTasksStore()
 
@@ -95,6 +113,10 @@ const chatDraft = ref('')
 const briefCache = ref<BriefCacheEntry | null>(null)
 const briefPrefetching = ref(false)
 const homeGeminiMessage = ref<HomeGeminiMessage | null>(null)
+const chatMessagesByScope = reactive<Record<string, ChatMessage[]>>({})
+const chatWindowRef = ref<HTMLElement | null>(null)
+const chatStreaming = ref(false)
+let nextChatMessageId = 1
 
 const currentTaskId = computed(() => {
   const id = Number(route.params.id)
@@ -102,6 +124,9 @@ const currentTaskId = computed(() => {
 })
 
 const geminiModelLabel = computed(() => brief.value?.model || fallbackGeminiModel)
+const canSendChatDraft = computed(() => chatDraft.value.trim().length > 0 && !chatStreaming.value)
+const activeChatScope = computed(() => (currentTaskId.value ? `task:${currentTaskId.value}` : 'home'))
+const activeChatMessages = computed(() => chatMessagesByScope[activeChatScope.value] || [])
 
 const taskFactsTrigger = computed(() => {
   if (!currentTaskId.value) return ''
@@ -372,7 +397,189 @@ async function openGeminiBrief(forceRefresh = false) {
 }
 
 function refreshGeminiBrief() {
+  if (!currentTaskId.value) {
+    clearChatMessages('home')
+  }
   openGeminiBrief(true)
+}
+
+function ensureChatMessages(scope = activeChatScope.value) {
+  if (!chatMessagesByScope[scope]) {
+    chatMessagesByScope[scope] = []
+  }
+  return chatMessagesByScope[scope]
+}
+
+function clearChatMessages(scope = activeChatScope.value) {
+  chatMessagesByScope[scope] = []
+}
+
+function closeGeminiDialog() {
+  if (!currentTaskId.value) {
+    clearChatMessages('home')
+  }
+  briefDialogVisible.value = false
+}
+
+async function scrollChatToBottom() {
+  await nextTick()
+  if (!chatWindowRef.value) return
+  chatWindowRef.value.scrollTop = chatWindowRef.value.scrollHeight
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms)
+  })
+}
+
+function buildChatHistory(messages: ChatMessage[]): GeminiChatHistoryItem[] {
+  return messages
+    .filter((message) => message.text.trim() && message.status !== 'streaming' && message.status !== 'failed')
+    .slice(-8)
+    .map((message) => ({
+      role: message.role,
+      content: message.text.trim(),
+    }))
+}
+
+function parseSseBlock(block: string): SsePayload | null {
+  const lines = block.split('\n')
+  let event = 'message'
+  const dataLines: string[] = []
+
+  lines.forEach((line) => {
+    if (line.startsWith('event:')) {
+      event = line.slice(6).trim()
+    } else if (line.startsWith('data:')) {
+      dataLines.push(line.slice(5).trimStart())
+    }
+  })
+
+  if (!dataLines.length) return null
+
+  try {
+    return {
+      event,
+      data: JSON.parse(dataLines.join('\n')),
+    }
+  } catch {
+    return null
+  }
+}
+
+function collectSseEvents(buffer: string): { events: SsePayload[]; remaining: string } {
+  const normalized = buffer.replace(/\r\n/g, '\n')
+  const blocks = normalized.split('\n\n')
+  const remaining = blocks.pop() || ''
+  const events = blocks
+    .map((block) => parseSseBlock(block))
+    .filter((event): event is SsePayload => Boolean(event))
+  return { events, remaining }
+}
+
+async function streamGeminiReply(text: string, assistantMessage: ChatMessage, history: GeminiChatHistoryItem[]) {
+  const taskId = currentTaskId.value
+  const url = taskId ? `/api/gemini/tasks/${taskId}/chat/stream` : '/api/gemini/chat/stream'
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: text, history }),
+  })
+
+  if (!response.ok) {
+    throw new Error(`Gemini chat request failed: ${response.status}`)
+  }
+  if (!response.body) {
+    throw new Error('Gemini chat response did not include a stream')
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+
+    buffer += decoder.decode(value, { stream: true })
+    const parsed = collectSseEvents(buffer)
+    buffer = parsed.remaining
+
+    for (const event of parsed.events) {
+      if (event.event === 'delta') {
+        assistantMessage.text += String(event.data.text || '')
+        await scrollChatToBottom()
+        await delay(renderDeltaDelayMs)
+      } else if (event.event === 'error') {
+        throw new Error(String(event.data.detail || 'Gemini chat request failed'))
+      } else if (event.event === 'done') {
+        assistantMessage.status = 'done'
+      }
+    }
+  }
+
+  buffer += decoder.decode()
+  const parsed = collectSseEvents(`${buffer}\n\n`)
+  for (const event of parsed.events) {
+    if (event.event === 'delta') {
+      assistantMessage.text += String(event.data.text || '')
+      await scrollChatToBottom()
+      await delay(renderDeltaDelayMs)
+    } else if (event.event === 'error') {
+      throw new Error(String(event.data.detail || 'Gemini chat request failed'))
+    } else if (event.event === 'done') {
+      assistantMessage.status = 'done'
+    }
+  }
+
+  if (!assistantMessage.text.trim()) {
+    assistantMessage.text = 'Gemini 没有返回内容。'
+  }
+  assistantMessage.status = 'done'
+  scrollChatToBottom()
+}
+
+async function sendChatDraft() {
+  const text = chatDraft.value.trim()
+  if (!text || chatStreaming.value) return
+
+  const messages = ensureChatMessages()
+  const history = buildChatHistory(messages)
+  const userMessage: ChatMessage = {
+    id: nextChatMessageId,
+    role: 'user',
+    text,
+  }
+  nextChatMessageId += 1
+  const assistantMessage: ChatMessage = {
+    id: nextChatMessageId,
+    role: 'assistant',
+    text: '',
+    status: 'streaming',
+  }
+  nextChatMessageId += 1
+
+  messages.push(userMessage, assistantMessage)
+  chatDraft.value = ''
+  chatStreaming.value = true
+  await scrollChatToBottom()
+
+  try {
+    await streamGeminiReply(text, assistantMessage, history)
+  } catch (error: any) {
+    assistantMessage.status = 'failed'
+    assistantMessage.text = error?.message || 'Gemini chat request failed'
+    scrollChatToBottom()
+  } finally {
+    chatStreaming.value = false
+  }
+}
+
+function onChatDraftKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Enter' || event.shiftKey) return
+  event.preventDefault()
+  sendChatDraft()
 }
 
 function onAgentClick(key: AgentKey) {
@@ -395,6 +602,20 @@ onMounted(() => {
 watch(taskFactsTrigger, () => {
   prefetchGeminiBrief()
 }, { immediate: true })
+
+watch(
+  () => ({
+    taskId: currentTaskId.value,
+    status: store.selectedTask?.status || '',
+  }),
+  (current, previous) => {
+    if (!current.taskId || !previous?.taskId) return
+    if (current.taskId !== previous.taskId) return
+    if (current.status && previous.status && current.status !== previous.status) {
+      clearChatMessages(`task:${current.taskId}`)
+    }
+  },
+)
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onViewportResize)
@@ -455,7 +676,7 @@ onBeforeUnmount(() => {
             <el-button
               class="chat-icon-button"
               circle
-              @click="briefDialogVisible = false"
+              @click="closeGeminiDialog"
             >
               <span class="chat-close-symbol" aria-hidden="true"></span>
             </el-button>
@@ -464,7 +685,7 @@ onBeforeUnmount(() => {
       </template>
 
       <div class="chat-shell">
-        <div class="chat-window">
+        <div ref="chatWindowRef" class="chat-window">
           <div v-if="briefLoading" class="chat-loading">
             <el-skeleton :rows="5" animated />
           </div>
@@ -518,6 +739,24 @@ onBeforeUnmount(() => {
               </section>
             </div>
           </div>
+          <div
+            v-for="message in activeChatMessages"
+            :key="message.id"
+            :class="['message-row', message.role === 'user' ? 'is-user' : 'is-gemini']"
+          >
+            <div v-if="message.role === 'assistant'" class="message-avatar">
+              <img :src="geminiIcon" alt="Gemini">
+            </div>
+            <div
+              :class="[
+                'message-bubble',
+                message.role === 'user' ? 'user-message-bubble' : 'assistant-message-bubble',
+                { 'is-streaming': message.status === 'streaming', 'is-failed': message.status === 'failed' },
+              ]"
+            >
+              <p>{{ message.text }}</p>
+            </div>
+          </div>
         </div>
 
         <div class="chat-composer">
@@ -528,14 +767,15 @@ onBeforeUnmount(() => {
               type="textarea"
               :rows="3"
               resize="none"
-              disabled
-              placeholder="对话输入稍后接入"
+              placeholder="输入消息"
+              @keydown="onChatDraftKeydown"
             />
             <el-button
               class="composer-send-button"
               :icon="ArrowUp"
               circle
-              disabled
+              :disabled="!canSendChatDraft"
+              @click="sendChatDraft"
             />
           </div>
         </div>
@@ -747,6 +987,16 @@ onBeforeUnmount(() => {
   gap: 10px;
 }
 
+.message-row.is-user {
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.message-row.is-gemini + .message-row.is-gemini,
+.message-row.is-user + .message-row.is-gemini {
+  margin-top: 12px;
+}
+
 .message-avatar {
   flex: 0 0 auto;
   width: 36px;
@@ -779,6 +1029,43 @@ onBeforeUnmount(() => {
   margin: 0;
   color: #26364d;
   line-height: 1.65;
+}
+
+.assistant-message-bubble {
+  gap: 0;
+}
+
+.assistant-message-bubble p {
+  margin: 0;
+  white-space: pre-wrap;
+  color: #26364d;
+  line-height: 1.65;
+}
+
+.assistant-message-bubble.is-streaming:empty::after,
+.assistant-message-bubble.is-streaming p:empty::after {
+  color: #94a3b8;
+  content: "Gemini 正在输入...";
+}
+
+.assistant-message-bubble.is-failed {
+  border-color: rgba(239, 68, 68, 0.18);
+  background: rgba(254, 242, 242, 0.96);
+}
+
+.user-message-bubble {
+  max-width: min(300px, 82%);
+  gap: 0;
+  border-color: rgba(59, 130, 246, 0.16);
+  background: #dbeafe;
+  box-shadow: 0 8px 16px rgba(37, 99, 235, 0.1);
+}
+
+.user-message-bubble p {
+  margin: 0;
+  white-space: pre-wrap;
+  color: #15345f;
+  line-height: 1.6;
 }
 
 .message-section {
@@ -858,13 +1145,6 @@ onBeforeUnmount(() => {
   color: #a8b2c2;
 }
 
-.composer-input.is-disabled :deep(.el-textarea__inner) {
-  background: transparent;
-  box-shadow: none;
-  color: #8a96a8;
-  -webkit-text-fill-color: #8a96a8;
-}
-
 .composer-send-button {
   position: absolute;
   right: 12px;
@@ -873,6 +1153,12 @@ onBeforeUnmount(() => {
   height: 36px;
   border: 0;
   background: #8c939d;
+  color: #ffffff;
+}
+
+.composer-send-button:not(.is-disabled):hover,
+.composer-send-button:not(.is-disabled):focus {
+  background: #64748b;
   color: #ffffff;
 }
 

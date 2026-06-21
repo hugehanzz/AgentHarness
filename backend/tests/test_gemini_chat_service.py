@@ -1,0 +1,145 @@
+from types import SimpleNamespace
+
+from app.schemas.gemini import (
+    GeminiAgentRunFact,
+    GeminiChatMessage,
+    GeminiChatRequest,
+    GeminiCommandRunFact,
+    GeminiEventFact,
+    GeminiGateFact,
+    GeminiReviewSummary,
+    GeminiSafeNextAction,
+    GeminiTaskFact,
+    GeminiTaskFacts,
+)
+from app.core.state_machine import TaskStatus
+from app.models.command import CommandStatus
+from app.models.task import TaskPriority
+from app.models.worker import RunStatus
+from app.services.gemini_chat_service import (
+    build_home_chat_messages,
+    build_task_chat_messages,
+    extract_stream_delta,
+    normalize_history,
+    split_text_delta,
+    sse_event,
+)
+
+
+def make_payload() -> GeminiChatRequest:
+    return GeminiChatRequest(
+        message="现在卡在哪里？",
+        history=[
+            GeminiChatMessage(role="user", content="你好"),
+            GeminiChatMessage(role="assistant", content="你好，我是 Gemini"),
+        ],
+    )
+
+
+def make_facts() -> GeminiTaskFacts:
+    return GeminiTaskFacts(
+        facts_version="abc123",
+        task=GeminiTaskFact(
+            id=1,
+            title="测试任务",
+            description="实现一个功能",
+            workspace_path="D:/workspace",
+            status=TaskStatus.ACCEPTANCE_READY,
+            priority=TaskPriority.MEDIUM,
+        ),
+        current_gate=GeminiGateFact(
+            type="ACCEPTANCE",
+            owner="Human Supervisor",
+            reason="等待人工验收",
+        ),
+        allowed_next_statuses=[TaskStatus.ACCEPTANCE_PASSED],
+        recent_events=[
+            GeminiEventFact(
+                event_type="STATE_CHANGED",
+                from_status=TaskStatus.RECHECK_DONE,
+                to_status=TaskStatus.ACCEPTANCE_READY,
+                message="ready",
+                created_by="system",
+                created_at="2026-06-21T00:00:00",
+            )
+        ],
+        latest_agent_runs=[
+            GeminiAgentRunFact(
+                id=1,
+                run_type="CODEX",
+                provider_type="CODEX",
+                status=RunStatus.SUCCEEDED,
+                output_excerpt="done",
+                error_message=None,
+                finished_at="2026-06-21T00:00:00",
+                created_at="2026-06-21T00:00:00",
+            )
+        ],
+        review_summary=GeminiReviewSummary(
+            total_count=0,
+            open_count=0,
+            high_open_count=0,
+            medium_open_count=0,
+            low_open_count=0,
+            unknown_open_count=0,
+            open_items=[],
+        ),
+        recent_commands=[
+            GeminiCommandRunFact(
+                id=1,
+                command_key="pytest",
+                status=CommandStatus.SUCCEEDED,
+                exit_code=0,
+                duration_ms=100,
+                created_at="2026-06-21T00:00:00",
+            )
+        ],
+        safe_next_actions=[
+            GeminiSafeNextAction(
+                type="WAIT_HUMAN",
+                label="等待验收",
+                requires_human=True,
+                reason="Human Supervisor gate",
+            )
+        ],
+    )
+
+
+def test_sse_event_formats_json_payload():
+    assert sse_event("delta", {"text": "你好"}) == 'event: delta\ndata: {"text": "你好"}\n\n'
+
+
+def test_split_text_delta_breaks_large_delta_for_progressive_display():
+    assert split_text_delta("abcdefghijkl", chunk_size=5) == ["abcde", "fghij", "kl"]
+
+
+def test_normalize_history_keeps_supported_roles():
+    history = normalize_history(make_payload())
+
+    assert history == [
+        {"role": "user", "content": "你好"},
+        {"role": "assistant", "content": "你好，我是 Gemini"},
+    ]
+
+
+def test_build_home_chat_messages_includes_guardrails():
+    messages = build_home_chat_messages(make_payload())
+
+    assert messages[0]["role"] == "system"
+    assert "不能确认计划" in messages[0]["content"]
+    assert messages[-1] == {"role": "user", "content": "现在卡在哪里？"}
+
+
+def test_build_task_chat_messages_includes_facts_and_guardrails():
+    messages = build_task_chat_messages(make_facts(), make_payload())
+
+    assert messages[0]["role"] == "system"
+    assert "CURRENT_TASK_FACTS" in messages[0]["content"]
+    assert "等待人工验收" in messages[0]["content"]
+    assert "不能批准验收" in messages[0]["content"]
+
+
+def test_extract_stream_delta_reads_choice_delta_content():
+    chunk = SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="OK"))])
+
+    assert extract_stream_delta(chunk) == "OK"

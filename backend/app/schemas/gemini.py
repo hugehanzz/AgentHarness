@@ -1,4 +1,5 @@
 from pydantic import BaseModel, Field
+from typing import Literal
 
 from app.core.state_machine import TaskStatus
 from app.models.command import CommandStatus
@@ -15,6 +16,16 @@ class GeminiTextResponse(BaseModel):
     model: str
     text: str
     finish_reason: str | None = None
+
+
+class GeminiChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=4000)
+
+
+class GeminiChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=4000)
+    history: list[GeminiChatMessage] = Field(default_factory=list, max_length=8)
 
 
 class GeminiTaskFact(BaseModel):
