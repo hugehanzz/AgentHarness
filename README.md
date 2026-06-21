@@ -90,6 +90,47 @@ Bash
 - `claude_review`
 - `claude_recheck`
 
+### Gemini API
+
+Gemini 作为系统内部 Secretary agent 接入，不在外部业务项目 `workspace_path` 中执行命令，也不直接修改业务代码。后端通过 Gemini 原生 API 调用模型：
+
+```text
+models/{model}:generateContent
+models/{model}:streamGenerateContent?alt=sse
+```
+
+推荐环境变量：
+
+```env
+GEMINI_API_KEY=<your-gemini-api-key>
+GEMINI_MODEL=gemini-3.1-flash-lite
+GEMINI_PROXY_URL=http://127.0.0.1:7890
+```
+
+后端负责：
+
+- 从任务状态、事件、AgentRun、Review 结果、CommandRun、gate 和允许流转中构建只读 task facts。
+- 使用 `facts_version` 标识事实层版本，供前端缓存和判断 Gemini brief 是否过期。
+- 调用 `generateContent` 生成结构化任务简报。
+- 调用 `streamGenerateContent?alt=sse` 提供 Gemini 对话流式回复。
+- 将 Gemini 限定为 Secretary Mode：只做总结、解释、问答、风险提示和下一步建议。
+
+当前 Gemini 能力：
+
+- 首页 Gemini 对话框：展示固定问候，并支持普通秘书式问答。
+- 任务详情 Gemini 对话框：基于当前任务 facts 回答进度、gate、风险和下一步问题。
+- 任务 brief：在关键阶段支持后台预热，并基于 `facts_version` 缓存。
+- SSE 流式输出：后端转发 Gemini 原生 stream delta，前端实时刷新消息气泡。
+
+当前 Gemini 不能：
+
+- 不能确认计划。
+- 不能批准验收。
+- 不能安装依赖。
+- 不能绕过 Human Supervisor gate。
+- 不能直接触发 worker run 或修改任务状态。
+- 不能直接修改外部业务项目代码。
+
 ## 工作流
 
 前端显示 9 个阶段：
@@ -181,48 +222,6 @@ Agent Runs 刷新规则：
 - 下一次创建任务时，输入框可以视觉上保持为空。
 - 如果用户不选择新路径，会默认使用上一次路径。
 - placeholder 也显示上一次路径。
-
-## Gemini Agent Roadmap
-
-Gemini 会分阶段从系统秘书升级为流程协调员，核心原则是：Gemini 读取后端提供的事实，可以总结和提出动作建议，但不能直接修改状态机，也不能绕过 Human Supervisor gate。
-
-### Current Status
-
-- 后端已接入 Gemini 原生 API，而不是 OpenAI-compatible 路径：
-  - 非流式文本调用使用 `models/{model}:generateContent`。
-  - 对话流式调用使用 `models/{model}:streamGenerateContent?alt=sse`。
-- Gemini API key 从 `GEMINI_API_KEY` 读取；本地代理可通过 `GEMINI_PROXY_URL` 配置，例如 `http://127.0.0.1:7890`。
-- 任务详情页已具备 Gemini Secretary 对话框：
-  - 点击 Gemini 悬浮图标打开对话框。
-  - 打开任务详情页时，Gemini brief 会基于 `facts_version` 缓存；关键阶段会后台预热，避免点击后空白等待。
-  - 用户输入后，后端通过 SSE 返回 Gemini 回复，前端按 delta 实时刷新消息气泡。
-  - 任务状态变化时，任务详情页会清理该任务下的人类聊天消息，避免旧上下文污染新阶段。
-- 首页点击 Gemini 悬浮图标也会打开同款对话框，默认展示固定问候“你好，我是Gemini~”；首页刷新或关闭 Gemini 对话框时，会清空首页人类消息。
-- 前端当前有三个可拖动悬浮 agent 图标：Codex、Claude、Gemini。它们保持独立拖动，并带有防重叠推开约束。
-- Gemini 当前仍是 Secretary Mode：可以总结、解释、问答和建议，但不触发 worker run、不修改任务状态、不批准计划、不批准验收。
-
-### Stage 1: Secretary Mode
-
-- 后端从任务状态、事件、AgentRun、ReviewItem、CommandRun、gate 和允许流转中构建只读事实包。
-- Gemini 基于事实包总结当前进度、解释当前 gate、提示风险并建议下一步。
-- Gemini 不修改任务状态、不触发 worker run、不批准计划、不批准验收。
-
-### Stage 2: Action Proposal Mode
-
-- Gemini 可以输出结构化动作建议，例如 `REQUEST_REVIEW`、`REQUEST_RECHECK`、`START_ARCHIVE`。
-- 动作建议只是 proposal，不是执行权限。
-- 计划确认和最终验收始终属于 Human Supervisor。
-
-### Stage 3: Policy-Checked Execution
-
-- 后端根据状态机、当前事实、允许流转和 human gate 规则校验 Gemini proposal。
-- Gemini 永远不直接写状态机。
-- 被拒绝的 proposal 应该能向用户解释原因。
-
-### Stage 4: Auto Scheduling
-
-- 低风险且通过 policy 校验的动作可以自动执行，例如实现完成后请求 review、修复完成后请求 recheck、验收通过后触发 archive。
-- 高风险动作、依赖安装、外部业务项目修改决策、计划确认和验收通过仍由 Human Supervisor 控制。
 
 ## 后端服务
 
