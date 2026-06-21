@@ -42,6 +42,8 @@ ALLOWED_TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
 }
 
 
+# These states intentionally stop automation. The backend can describe the gate,
+# but only the Human Supervisor may make the decision that leaves it.
 HUMAN_GATE_STATUSES = {
     TaskStatus.PLAN_READY,
     TaskStatus.ACCEPTANCE_READY,

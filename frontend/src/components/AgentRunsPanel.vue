@@ -72,6 +72,8 @@ function stopPolling() {
 function startPolling() {
   if (pollTimer) return
   pollStartedAt = Date.now()
+  // Runs are executed by external processes; polling keeps the UI fresh without
+  // requiring a websocket channel for every AgentRun.
   pollTimer = window.setInterval(() => {
     if (Date.now() - pollStartedAt >= maxPollingMs) {
       stopPolling()
@@ -95,6 +97,8 @@ watch(
 watch(
   () => latestRun.value?.id,
   () => {
+    // Collapse old diagnostics/details when a new run arrives so evidence from
+    // the previous run is not visually mixed with the latest execution.
     openDiagnostics.value = []
     openRunDetails.value = []
   },

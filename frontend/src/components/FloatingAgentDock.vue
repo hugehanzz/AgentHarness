@@ -223,6 +223,8 @@ function pushAway(sourceKey: AgentKey, targetKey: AgentKey) {
 }
 
 function resolvePushAway(activeKey: AgentKey) {
+  // Keep the three agent icons independently draggable while preventing overlap.
+  // The dragged icon is authoritative; nearby icons are gently pushed away.
   for (let pass = 0; pass < agents.length; pass += 1) {
     agents.forEach((sourceAgent) => {
       agents.forEach((targetAgent) => {
@@ -335,6 +337,8 @@ async function prefetchGeminiBrief() {
   if (!currentTaskId.value || briefPrefetching.value) return
   if (!store.selectedTask || !geminiBriefPrefetchStatuses.has(store.selectedTask.status)) return
 
+  // Brief generation is slow enough to feel blank on click, so key workflow
+  // states warm the cache in the background and rely on facts_version to expire.
   briefPrefetching.value = true
   try {
     const taskId = currentTaskId.value
@@ -419,6 +423,8 @@ function updateChatMessage(scope: string, id: number, updater: (message: ChatMes
   if (!messages) return
   const index = messages.findIndex((message) => message.id === id)
   if (index < 0) return
+  // Replace the array item instead of mutating a captured object reference.
+  // This makes every streamed Gemini delta reliably trigger Vue rendering.
   messages[index] = updater(messages[index])
 }
 
@@ -488,6 +494,8 @@ function parseSseBlock(block: string): SsePayload | null {
 }
 
 function collectSseEvents(buffer: string): { events: SsePayload[]; remaining: string } {
+  // A network read can contain partial, one, or many SSE frames. Keep the
+  // unfinished tail in the buffer and emit only complete "\n\n" blocks.
   const normalized = buffer.replace(/\r\n/g, '\n')
   const blocks = normalized.split('\n\n')
   const remaining = blocks.pop() || ''
@@ -517,6 +525,8 @@ async function streamGeminiReply(text: string, assistantMessageId: number, histo
   const decoder = new TextDecoder()
   let buffer = ''
 
+  // Read the browser stream directly instead of using axios; axios does not
+  // expose incremental response body reads in the browser.
   while (true) {
     const { value, done } = await reader.read()
     if (done) break

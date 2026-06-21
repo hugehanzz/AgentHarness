@@ -15,6 +15,8 @@ def build_gemini_native_model_url(base_url: str, model: str, action: str) -> str
 
 
 def resolve_gemini_base_url(gemini_base_url: str, google_gemini_base_url: str | None = None) -> str:
+    # GOOGLE_GEMINI_BASE_URL is kept as a compatibility alias for early local
+    # setups; GEMINI_BASE_URL is the preferred native Gemini endpoint setting.
     return (google_gemini_base_url or gemini_base_url).rstrip("/")
 
 

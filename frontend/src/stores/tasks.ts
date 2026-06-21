@@ -26,6 +26,8 @@ export const useTasksStore = defineStore('tasks', {
       this.tasks = data
     },
     async fetchTask(id: number) {
+      // Clear stale detail state before loading a new task so panels do not
+      // briefly render the previous task under the new route.
       this.detailLoading = true
       this.detailError = null
       this.selectedTask = null
@@ -47,6 +49,8 @@ export const useTasksStore = defineStore('tasks', {
     },
     async transitionTask(id: number, toStatus: TaskStatus, message?: string) {
       await api.post(`/tasks/${id}/transition`, { to_status: toStatus, message })
+      // Refresh both detail and list views because a transition changes the
+      // current task row, board counters, pagination ordering, and events.
       await this.fetchTask(id)
       await this.fetchTasks()
     },

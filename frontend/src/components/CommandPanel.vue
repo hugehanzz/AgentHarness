@@ -25,6 +25,8 @@ const outputText = computed(() => {
 })
 
 async function run(commandKey: string) {
+  // The backend accepts only command keys, never raw shell text. This panel is a
+  // thin UI over the safe-command whitelist.
   errorMessage.value = ''
   result.value = null
   runningCommand.value = commandKey

@@ -25,6 +25,8 @@ ACTIVE_WORKER_NAMES = {name for name, _role, _worker_type in WORKER_DEFINITIONS}
 
 
 def ensure_workers(session: Session) -> None:
+    # Startup is idempotent: update existing worker rows so role/type changes in
+    # code are reflected without destructive database migrations.
     for name, role, worker_type in WORKER_DEFINITIONS:
         existing = session.exec(select(AgentWorker).where(AgentWorker.name == name)).first()
         if existing:
@@ -37,6 +39,8 @@ def ensure_workers(session: Session) -> None:
 
 
 def heartbeat_workers(session: Session) -> None:
+    # Only internal/local workers get synthetic heartbeats. External API-backed
+    # capabilities such as Gemini do not imply a long-running local process.
     now = app_now()
     workers = session.exec(select(AgentWorker).where(AgentWorker.name.in_(ACTIVE_WORKER_NAMES))).all()
     for worker in workers:

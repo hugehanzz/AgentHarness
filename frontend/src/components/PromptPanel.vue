@@ -82,6 +82,8 @@ async function refreshPromptPreview() {
 }
 
 function emitPromptChanged() {
+  // The parent only sends prompt_override when the edited prompt type matches
+  // the run button being triggered. Other prompt types stay preview-only.
   emit('promptChanged', {
     promptType: selectedType.value,
     content: content.value,
@@ -107,6 +109,7 @@ function savePromptEdit() {
 watch(
   () => props.currentStatus,
   () => {
+    // Keep the prompt panel aligned with the next natural workflow action.
     selectedType.value = recommendedType.value
   },
   { immediate: true },

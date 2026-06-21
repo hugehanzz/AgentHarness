@@ -41,6 +41,8 @@ def get_task_events(session: Session, task_id: int) -> list[TaskEvent]:
 
 
 def has_successful_acceptance_checklist(session: Session, task_id: int) -> bool:
+    # Acceptance is a human decision, but it must be preceded by Codex producing
+    # an explicit checklist/evidence package for the supervisor to inspect.
     run = session.exec(
         select(AgentRun)
         .where(
@@ -58,6 +60,7 @@ def transition_task(session: Session, task_id: int, to_status: TaskStatus, messa
     from_status = task.status
     if not can_transition(from_status, to_status):
         raise HTTPException(status_code=400, detail=f"Invalid transition: {from_status} -> {to_status}")
+    # Guard the final acceptance gate with evidence, not just a button click.
     if (
         from_status == TaskStatus.ACCEPTANCE_READY
         and to_status == TaskStatus.ACCEPTANCE_PASSED

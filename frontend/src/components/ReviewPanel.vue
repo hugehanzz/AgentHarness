@@ -32,6 +32,8 @@ function issueStatusText(status: string) {
 }
 
 async function parseReview() {
+  // REVIEW.md is owned by the reviewer agent in the external workspace. The
+  // frontend only asks the backend to parse and mirror it for display.
   const { data } = await api.post('/reviews/parse', {
     workspace_path: workspacePath.value,
     task_id: props.taskId,

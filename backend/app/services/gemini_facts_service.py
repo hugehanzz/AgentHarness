@@ -62,6 +62,9 @@ def build_gemini_task_facts(session: Session, task_id: int) -> GeminiTaskFacts:
         select(CommandRun).where(CommandRun.task_id == task_id).order_by(CommandRun.created_at.desc()).limit(5)
     ).all()
 
+    # Gemini receives a read-only fact package instead of direct database or
+    # workspace access. This keeps Secretary answers grounded without giving it
+    # authority to mutate task state or external project files.
     payload = {
         "task": GeminiTaskFact(
             id=task.id,
@@ -119,6 +122,8 @@ def build_gemini_task_facts(session: Session, task_id: int) -> GeminiTaskFacts:
 
 
 def build_facts_version(payload: dict) -> str:
+    # The frontend uses this stable hash to decide whether a cached Gemini brief
+    # is still valid after task events, runs, reviews, or command results change.
     stable_json = json.dumps(
         normalize_for_hash(payload),
         ensure_ascii=False,

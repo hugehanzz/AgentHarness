@@ -93,6 +93,8 @@ def get_latest_claude_task_session(session: Session, task_id: int) -> AgentSessi
 
 
 def get_or_create_claude_session(session: Session, task_id: int, workspace_path: str) -> AgentSession:
+    # Reuse a task's Claude session for review/recheck continuity, but rotate
+    # shared workspace sessions after several tasks to avoid context drift.
     task_session = get_latest_claude_task_session(session, task_id)
     if task_session:
         return task_session
@@ -187,6 +189,8 @@ async def run_codex_app_server_agent(
     prompt = resolve_prompt(task, CODEX_APP_SERVER_RUN_TYPES[run_type], prompt_override)
     existing_thread_id = get_latest_codex_thread_id(session, task.id)
     now = app_now()
+    # Persist the AgentRun before starting external work so failures and
+    # timeouts still leave an auditable execution record.
     record = AgentRun(
         task_id=task.id,
         worker_id=worker.id if worker else None,
@@ -309,6 +313,8 @@ async def run_local_agent(
     task_should_be_counted = should_count_task_for_session(session, claude_session.id, task.id)
     run_command = build_claude_cli_command(command, resume_session_id)
     now = app_now()
+    # Claude CLI is run as a bounded, non-interactive subprocess; stdout is
+    # parsed as JSON while stderr and model metadata are kept as diagnostics.
     record = AgentRun(
         task_id=task.id,
         worker_id=worker.id if worker else None,
@@ -527,6 +533,8 @@ class CodexAppServerProcess:
             )
             await ws.send(json.dumps({"method": "initialized"}))
             if thread_id:
+                # Resume the existing Codex thread for task continuity; new
+                # tasks start fresh but later plan/build/fix/archive turns share context.
                 thread_response = await self.request(
                     ws,
                     "thread/resume",

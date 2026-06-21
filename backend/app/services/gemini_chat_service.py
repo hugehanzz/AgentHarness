@@ -25,6 +25,8 @@ def split_text_delta(text: str, chunk_size: int = DELTA_CHUNK_SIZE) -> list[str]
 
 
 async def stream_text_delta(text: str):
+    # Gemini sometimes sends a large native delta after a long first-token wait.
+    # Split it before forwarding so the browser still paints a readable stream.
     chunks = split_text_delta(text)
     for index, chunk in enumerate(chunks):
         yield sse_event("delta", {"text": chunk})
@@ -83,6 +85,8 @@ def build_native_payload(messages: list[dict[str, str]]) -> dict[str, Any]:
     system_parts: list[dict[str, str]] = []
     contents: list[dict[str, Any]] = []
 
+    # Gemini native chat uses "model" for assistant turns, while the UI and
+    # OpenAI-style history use "assistant". Keep the mapping at the API edge.
     for message in messages:
         role = message["role"]
         content = message["content"]
@@ -166,6 +170,8 @@ async def stream_gemini_chat(messages: list[dict[str, str]], facts_version: str 
                     yield sse_event("error", {"detail": f"Gemini native API returned {response.status_code}: {detail}"})
                     return
 
+                # The native endpoint streams SSE lines. We parse only data
+                # frames and re-emit our smaller, frontend-stable SSE envelope.
                 async for line in response.aiter_lines():
                     payload = parse_native_sse_line(line)
                     if not payload:

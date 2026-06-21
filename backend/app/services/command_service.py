@@ -18,6 +18,8 @@ SAFE_COMMANDS: dict[str, list[str]] = {
 
 
 async def run_safe_command(session: Session, command_key: str, workspace_path: str, task_id: int | None = None) -> CommandRun:
+    # Commands are keyed by server-side registrations so the frontend can never
+    # pass arbitrary shell text into subprocess execution.
     if command_key not in SAFE_COMMANDS:
         raise HTTPException(status_code=400, detail="Command is not registered")
 
@@ -78,6 +80,8 @@ async def run_safe_command(session: Session, command_key: str, workspace_path: s
 
 
 async def run_registered_command(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+    # Prefer asyncio subprocesses; fall back to a thread for event loops that do
+    # not support subprocess APIs in the current runtime.
     try:
         return await run_registered_command_async(command, cwd)
     except NotImplementedError:
