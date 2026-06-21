@@ -414,6 +414,14 @@ function clearChatMessages(scope = activeChatScope.value) {
   chatMessagesByScope[scope] = []
 }
 
+function updateChatMessage(scope: string, id: number, updater: (message: ChatMessage) => ChatMessage) {
+  const messages = chatMessagesByScope[scope]
+  if (!messages) return
+  const index = messages.findIndex((message) => message.id === id)
+  if (index < 0) return
+  messages[index] = updater(messages[index])
+}
+
 function closeGeminiDialog() {
   if (!currentTaskId.value) {
     clearChatMessages('home')
@@ -431,6 +439,17 @@ function delay(ms: number) {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms)
   })
+}
+
+function nextAnimationFrame() {
+  return new Promise((resolve) => {
+    window.requestAnimationFrame(resolve)
+  })
+}
+
+async function flushChatRender() {
+  await scrollChatToBottom()
+  await nextAnimationFrame()
 }
 
 function buildChatHistory(messages: ChatMessage[]): GeminiChatHistoryItem[] {
@@ -478,7 +497,7 @@ function collectSseEvents(buffer: string): { events: SsePayload[]; remaining: st
   return { events, remaining }
 }
 
-async function streamGeminiReply(text: string, assistantMessage: ChatMessage, history: GeminiChatHistoryItem[]) {
+async function streamGeminiReply(text: string, assistantMessageId: number, history: GeminiChatHistoryItem[], scope: string) {
   const taskId = currentTaskId.value
   const url = taskId ? `/api/gemini/tasks/${taskId}/chat/stream` : '/api/gemini/chat/stream'
   const response = await fetch(url, {
@@ -508,13 +527,16 @@ async function streamGeminiReply(text: string, assistantMessage: ChatMessage, hi
 
     for (const event of parsed.events) {
       if (event.event === 'delta') {
-        assistantMessage.text += String(event.data.text || '')
-        await scrollChatToBottom()
+        updateChatMessage(scope, assistantMessageId, (message) => ({
+          ...message,
+          text: message.text + String(event.data.text || ''),
+        }))
+        await flushChatRender()
         await delay(renderDeltaDelayMs)
       } else if (event.event === 'error') {
         throw new Error(String(event.data.detail || 'Gemini chat request failed'))
       } else if (event.event === 'done') {
-        assistantMessage.status = 'done'
+        updateChatMessage(scope, assistantMessageId, (message) => ({ ...message, status: 'done' }))
       }
     }
   }
@@ -523,21 +545,28 @@ async function streamGeminiReply(text: string, assistantMessage: ChatMessage, hi
   const parsed = collectSseEvents(`${buffer}\n\n`)
   for (const event of parsed.events) {
     if (event.event === 'delta') {
-      assistantMessage.text += String(event.data.text || '')
-      await scrollChatToBottom()
+      updateChatMessage(scope, assistantMessageId, (message) => ({
+        ...message,
+        text: message.text + String(event.data.text || ''),
+      }))
+      await flushChatRender()
       await delay(renderDeltaDelayMs)
     } else if (event.event === 'error') {
       throw new Error(String(event.data.detail || 'Gemini chat request failed'))
     } else if (event.event === 'done') {
-      assistantMessage.status = 'done'
+      updateChatMessage(scope, assistantMessageId, (message) => ({ ...message, status: 'done' }))
     }
   }
 
-  if (!assistantMessage.text.trim()) {
-    assistantMessage.text = 'Gemini 没有返回内容。'
+  const assistantMessage = chatMessagesByScope[scope]?.find((message) => message.id === assistantMessageId)
+  if (!assistantMessage?.text.trim()) {
+    updateChatMessage(scope, assistantMessageId, (message) => ({
+      ...message,
+      text: 'Gemini 没有返回内容。',
+    }))
   }
-  assistantMessage.status = 'done'
-  scrollChatToBottom()
+  updateChatMessage(scope, assistantMessageId, (message) => ({ ...message, status: 'done' }))
+  await flushChatRender()
 }
 
 async function sendChatDraft() {
@@ -545,6 +574,7 @@ async function sendChatDraft() {
   if (!text || chatStreaming.value) return
 
   const messages = ensureChatMessages()
+  const scope = activeChatScope.value
   const history = buildChatHistory(messages)
   const userMessage: ChatMessage = {
     id: nextChatMessageId,
@@ -566,11 +596,14 @@ async function sendChatDraft() {
   await scrollChatToBottom()
 
   try {
-    await streamGeminiReply(text, assistantMessage, history)
+    await streamGeminiReply(text, assistantMessage.id, history, scope)
   } catch (error: any) {
-    assistantMessage.status = 'failed'
-    assistantMessage.text = error?.message || 'Gemini chat request failed'
-    scrollChatToBottom()
+    updateChatMessage(scope, assistantMessage.id, (message) => ({
+      ...message,
+      status: 'failed',
+      text: error?.message || 'Gemini chat request failed',
+    }))
+    await flushChatRender()
   } finally {
     chatStreaming.value = false
   }

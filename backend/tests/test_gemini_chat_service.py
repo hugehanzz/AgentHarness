@@ -1,5 +1,3 @@
-from types import SimpleNamespace
-
 from app.schemas.gemini import (
     GeminiAgentRunFact,
     GeminiChatMessage,
@@ -18,9 +16,12 @@ from app.models.task import TaskPriority
 from app.models.worker import RunStatus
 from app.services.gemini_chat_service import (
     build_home_chat_messages,
+    build_native_payload,
+    build_native_stream_url,
     build_task_chat_messages,
-    extract_stream_delta,
+    extract_native_stream_text,
     normalize_history,
+    parse_native_sse_line,
     split_text_delta,
     sse_event,
 )
@@ -139,7 +140,35 @@ def test_build_task_chat_messages_includes_facts_and_guardrails():
     assert "不能批准验收" in messages[0]["content"]
 
 
-def test_extract_stream_delta_reads_choice_delta_content():
-    chunk = SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="OK"))])
+def test_build_native_stream_url_targets_stream_generate_content():
+    assert (
+        build_native_stream_url("https://generativelanguage.googleapis.com/", "models/gemini-test")
+        == "https://generativelanguage.googleapis.com/v1beta/models/gemini-test:streamGenerateContent"
+    )
 
-    assert extract_stream_delta(chunk) == "OK"
+
+def test_build_native_payload_maps_chat_roles_to_gemini_roles():
+    payload = build_native_payload(
+        [
+            {"role": "system", "content": "system prompt"},
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "hi"},
+        ]
+    )
+
+    assert payload["systemInstruction"] == {"parts": [{"text": "system prompt"}]}
+    assert payload["contents"] == [
+        {"role": "user", "parts": [{"text": "hello"}]},
+        {"role": "model", "parts": [{"text": "hi"}]},
+    ]
+    assert payload["generationConfig"]["maxOutputTokens"] == 512
+
+
+def test_extract_native_stream_text_reads_candidate_parts():
+    payload = {"candidates": [{"content": {"parts": [{"text": "O"}, {"text": "K"}]}}]}
+
+    assert extract_native_stream_text(payload) == "OK"
+
+
+def test_parse_native_sse_line_reads_data_json():
+    assert parse_native_sse_line('data: {"candidates": []}') == {"candidates": []}

@@ -1,14 +1,14 @@
 import asyncio
 import json
-from collections.abc import Iterator
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import HTTPException
-from openai import APIConnectionError, APIError, APIStatusError, APITimeoutError
+import httpx
 
 from app.core.config import get_settings
 from app.schemas.gemini import GeminiChatRequest, GeminiTaskFacts
-from app.services.gemini_service import build_gemini_client, resolve_gemini_base_url
+from app.services.gemini_service import resolve_gemini_base_url
 
 DELTA_CHUNK_SIZE = 8
 DELTA_CHUNK_DELAY_SECONDS = 0.025
@@ -74,6 +74,40 @@ def build_task_chat_messages(facts: GeminiTaskFacts, payload: GeminiChatRequest)
     ]
 
 
+def build_native_stream_url(base_url: str, model: str) -> str:
+    normalized_model = model.removeprefix("models/")
+    return f"{base_url.rstrip('/')}/v1beta/models/{quote(normalized_model, safe='')}:streamGenerateContent"
+
+
+def build_native_payload(messages: list[dict[str, str]]) -> dict[str, Any]:
+    system_parts: list[dict[str, str]] = []
+    contents: list[dict[str, Any]] = []
+
+    for message in messages:
+        role = message["role"]
+        content = message["content"]
+        if role == "system":
+            system_parts.append({"text": content})
+            continue
+        contents.append(
+            {
+                "role": "model" if role == "assistant" else "user",
+                "parts": [{"text": content}],
+            }
+        )
+
+    payload: dict[str, Any] = {
+        "contents": contents,
+        "generationConfig": {
+            "temperature": 0.2,
+            "maxOutputTokens": 512,
+        },
+    }
+    if system_parts:
+        payload["systemInstruction"] = {"parts": system_parts}
+    return payload
+
+
 def normalize_history(payload: GeminiChatRequest) -> list[dict[str, str]]:
     normalized: list[dict[str, str]] = []
     for item in payload.history[-8:]:
@@ -84,20 +118,24 @@ def normalize_history(payload: GeminiChatRequest) -> list[dict[str, str]]:
     return normalized
 
 
-def extract_stream_delta(chunk: Any) -> str:
-    choices = getattr(chunk, "choices", None)
-    if not choices:
-        return ""
-    delta = getattr(choices[0], "delta", None)
-    content = getattr(delta, "content", None)
-    return content if isinstance(content, str) else ""
+def extract_native_stream_text(payload: dict[str, Any]) -> str:
+    texts: list[str] = []
+    for candidate in payload.get("candidates", []):
+        content = candidate.get("content") or {}
+        for part in content.get("parts", []):
+            text = part.get("text")
+            if isinstance(text, str):
+                texts.append(text)
+    return "".join(texts)
 
 
-def next_chunk(iterator: Iterator[Any]) -> Any | None:
-    try:
-        return next(iterator)
-    except StopIteration:
+def parse_native_sse_line(line: str) -> dict[str, Any] | None:
+    if not line.startswith("data:"):
         return None
+    data = line.removeprefix("data:").strip()
+    if not data or data == "[DONE]":
+        return None
+    return json.loads(data)
 
 
 async def stream_gemini_chat(messages: list[dict[str, str]], facts_version: str | None = None):
@@ -112,49 +150,40 @@ async def stream_gemini_chat(messages: list[dict[str, str]], facts_version: str 
             settings.google_gemini_base_url,
             settings.gemini_openai_base_url,
         )
-        client = build_gemini_client(
-            base_url,
-            settings.gemini_api_key,
-            settings.gemini_timeout_seconds,
-            settings.gemini_proxy_url,
-        )
-        iterator = await asyncio.wait_for(
-            asyncio.to_thread(
-                client.chat.completions.create,
-                model=settings.gemini_model,
-                messages=messages,
-                max_tokens=512,
-                temperature=0.2,
-                stream=True,
-            ),
-            timeout=settings.gemini_timeout_seconds,
-        )
+        url = build_native_stream_url(base_url, settings.gemini_model)
+        async with httpx.AsyncClient(proxy=settings.gemini_proxy_url, timeout=settings.gemini_timeout_seconds) as client:
+            async with client.stream(
+                "POST",
+                url,
+                params={"alt": "sse"},
+                headers={
+                    "Content-Type": "application/json",
+                    "x-goog-api-key": settings.gemini_api_key,
+                },
+                json=build_native_payload(messages),
+            ) as response:
+                if response.status_code >= 400:
+                    detail = (await response.aread()).decode("utf-8", errors="replace")
+                    yield sse_event("error", {"detail": f"Gemini native API returned {response.status_code}: {detail}"})
+                    return
 
-        while True:
-            chunk = await asyncio.wait_for(
-                asyncio.to_thread(next_chunk, iterator),
-                timeout=settings.gemini_timeout_seconds,
-            )
-            if chunk is None:
-                break
-            text = extract_stream_delta(chunk)
-            if text:
-                async for event in stream_text_delta(text):
-                    yield event
+                async for line in response.aiter_lines():
+                    payload = parse_native_sse_line(line)
+                    if not payload:
+                        continue
+                    text = extract_native_stream_text(payload)
+                    if text:
+                        async for event in stream_text_delta(text):
+                            yield event
 
         yield sse_event("done", {"model": settings.gemini_model, "facts_version": facts_version})
     except TimeoutError:
-        yield sse_event("error", {"detail": "Gemini OpenAI-compatible streaming request timed out"})
+        yield sse_event("error", {"detail": "Gemini native streaming request timed out"})
     except HTTPException as exc:
         yield sse_event("error", {"detail": exc.detail})
-    except APIStatusError as exc:
-        yield sse_event(
-            "error",
-            {"detail": f"Gemini OpenAI-compatible API returned {exc.status_code}: {exc.response.text}"},
-        )
-    except APITimeoutError as exc:
-        yield sse_event("error", {"detail": f"Gemini OpenAI-compatible API timed out: {exc}"})
-    except APIConnectionError as exc:
-        yield sse_event("error", {"detail": f"Gemini OpenAI-compatible API connection failed: {exc}"})
-    except APIError as exc:
-        yield sse_event("error", {"detail": f"Gemini OpenAI-compatible API failed: {exc}"})
+    except httpx.TimeoutException as exc:
+        yield sse_event("error", {"detail": f"Gemini native API timed out: {exc}"})
+    except httpx.HTTPError as exc:
+        yield sse_event("error", {"detail": f"Gemini native API request failed: {exc}"})
+    except json.JSONDecodeError as exc:
+        yield sse_event("error", {"detail": f"Gemini native API returned invalid SSE JSON: {exc}"})
