@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ArrowUp, Refresh } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
 import claudeIcon from '../assets/agent-icons/claudecode-color.png'
 import codexIcon from '../assets/agent-icons/codex-color.png'
 import geminiIcon from '../assets/agent-icons/gemini-color.png'
 import { api } from '../api/client'
 import type { GeminiTaskBrief, GeminiTaskFacts } from '../api/types'
+import { useTasksStore } from '../stores/tasks'
 
 type AgentKey = 'codex' | 'claude' | 'gemini'
 
@@ -38,19 +38,36 @@ type BriefCacheEntry = {
   brief: GeminiTaskBrief
 }
 
+type HomeGeminiMessage = {
+  text: string
+}
+
 const storageKey = 'agentharness.floatingAgentPositions.v3'
 const iconSize = 64
 const iconGap = 10
 const safeDistance = iconSize + iconGap
 const viewportPadding = 14
 const clickMoveTolerance = 4
+const fallbackGeminiModel = 'gemini-3.1-flash-lite'
 const route = useRoute()
+const store = useTasksStore()
 
 const agents: AgentIcon[] = [
   { key: 'codex', name: 'Codex', icon: codexIcon },
   { key: 'claude', name: 'Claude', icon: claudeIcon },
   { key: 'gemini', name: 'Gemini', icon: geminiIcon },
 ]
+
+const geminiBriefPrefetchStatuses = new Set([
+  'PLAN_READY',
+  'IMPLEMENT_DONE',
+  'REVIEW_DONE',
+  'RECHECK_DONE',
+  'ACCEPTANCE_READY',
+  'ACCEPTANCE_PASSED',
+  'ARCHIVED',
+  'DONE',
+])
 
 const positions = reactive<Record<AgentKey, Position>>({
   codex: { x: 0, y: 0 },
@@ -76,10 +93,24 @@ const briefError = ref('')
 const brief = ref<GeminiTaskBrief | null>(null)
 const chatDraft = ref('')
 const briefCache = ref<BriefCacheEntry | null>(null)
+const briefPrefetching = ref(false)
+const homeGeminiMessage = ref<HomeGeminiMessage | null>(null)
 
 const currentTaskId = computed(() => {
   const id = Number(route.params.id)
   return Number.isFinite(id) && id > 0 ? id : null
+})
+
+const geminiModelLabel = computed(() => brief.value?.model || fallbackGeminiModel)
+
+const taskFactsTrigger = computed(() => {
+  if (!currentTaskId.value) return ''
+  return [
+    currentTaskId.value,
+    store.selectedTask?.status || '',
+    store.selectedTask?.updated_at || '',
+    store.events.length,
+  ].join(':')
 })
 
 function defaultPositions() {
@@ -275,18 +306,51 @@ async function fetchGeminiBrief(taskId: number, factsVersion: string) {
   }
 }
 
+async function prefetchGeminiBrief() {
+  if (!currentTaskId.value || briefPrefetching.value) return
+  if (!store.selectedTask || !geminiBriefPrefetchStatuses.has(store.selectedTask.status)) return
+
+  briefPrefetching.value = true
+  try {
+    const taskId = currentTaskId.value
+    const { data: facts } = await api.get<GeminiTaskFacts>(`/gemini/tasks/${taskId}/facts`)
+    if (
+      briefCache.value
+      && briefCache.value.taskId === taskId
+      && briefCache.value.factsVersion === facts.facts_version
+    ) {
+      return
+    }
+    await fetchGeminiBrief(taskId, facts.facts_version)
+  } catch {
+    // Background prefetch is best effort; explicit open/refresh will surface errors.
+  } finally {
+    briefPrefetching.value = false
+  }
+}
+
 async function openGeminiBrief(forceRefresh = false) {
   if (!currentTaskId.value) {
-    ElMessage.info('请先进入一个任务详情页，再打开 Gemini 简报')
+    briefDialogVisible.value = true
+    briefLoading.value = false
+    briefError.value = ''
+    brief.value = null
+    homeGeminiMessage.value = { text: '你好，我是Gemini~' }
     return
   }
 
   briefDialogVisible.value = true
-  briefLoading.value = true
   briefError.value = ''
+  homeGeminiMessage.value = null
+  const cachedBrief = briefCache.value?.taskId === currentTaskId.value ? briefCache.value.brief : null
   if (forceRefresh) {
     brief.value = null
+  } else if (cachedBrief) {
+    brief.value = cachedBrief
+  } else {
+    brief.value = null
   }
+  briefLoading.value = forceRefresh || !brief.value
   try {
     const taskId = currentTaskId.value
     const { data: facts } = await api.get<GeminiTaskFacts>(`/gemini/tasks/${taskId}/facts`)
@@ -328,6 +392,10 @@ onMounted(() => {
   window.addEventListener('resize', onViewportResize)
 })
 
+watch(taskFactsTrigger, () => {
+  prefetchGeminiBrief()
+}, { immediate: true })
+
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onViewportResize)
 })
@@ -356,7 +424,7 @@ onBeforeUnmount(() => {
 
     <el-dialog
       v-model="briefDialogVisible"
-      width="520px"
+      width="440px"
       class="gemini-chat-dialog"
       append-to-body
       :modal="false"
@@ -373,7 +441,7 @@ onBeforeUnmount(() => {
             </span>
             <div>
               <div class="chat-title-name">Gemini</div>
-              <div class="chat-title-subtitle">{{ brief?.model || 'Secretary' }}</div>
+              <div class="chat-title-subtitle">{{ geminiModelLabel }}</div>
             </div>
           </div>
           <div class="chat-title-actions">
@@ -407,6 +475,14 @@ onBeforeUnmount(() => {
             show-icon
             :closable="false"
           />
+          <div v-else-if="homeGeminiMessage" class="message-row is-gemini">
+            <div class="message-avatar">
+              <img :src="geminiIcon" alt="Gemini">
+            </div>
+            <div class="message-bubble home-message-bubble">
+              <p>{{ homeGeminiMessage.text }}</p>
+            </div>
+          </div>
           <div v-else-if="brief" class="message-row is-gemini">
             <div class="message-avatar">
               <img :src="geminiIcon" alt="Gemini">
@@ -648,7 +724,7 @@ onBeforeUnmount(() => {
 
 .chat-shell {
   display: grid;
-  grid-template-rows: minmax(260px, 46vh) auto;
+  grid-template-rows: 320px auto;
   overflow: hidden;
   border: 1px solid rgba(16, 24, 40, 0.08);
   border-radius: 8px;
@@ -657,7 +733,7 @@ onBeforeUnmount(() => {
 
 .chat-window {
   min-height: 0;
-  padding: 18px 16px;
+  padding: 16px 14px;
   overflow-y: auto;
 }
 
@@ -685,13 +761,24 @@ onBeforeUnmount(() => {
 
 .message-bubble {
   display: grid;
-  max-width: min(390px, calc(100% - 50px));
+  max-width: min(326px, calc(100% - 48px));
   gap: 12px;
   padding: 12px 14px;
   border: 1px solid rgba(16, 24, 40, 0.06);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.94);
   box-shadow: 0 8px 18px rgba(16, 24, 40, 0.08);
+}
+
+.home-message-bubble {
+  min-width: 148px;
+  gap: 0;
+}
+
+.home-message-bubble p {
+  margin: 0;
+  color: #26364d;
+  line-height: 1.65;
 }
 
 .message-section {
@@ -737,15 +824,15 @@ onBeforeUnmount(() => {
 }
 
 .chat-composer {
-  padding: 12px;
+  padding: 10px;
   border-top: 1px solid rgba(16, 24, 40, 0.08);
   background: rgba(255, 255, 255, 0.88);
 }
 
 .composer-box {
   position: relative;
-  min-height: 118px;
-  padding: 14px 54px 14px 16px;
+  min-height: 96px;
+  padding: 12px 50px 12px 14px;
   border: 1px solid rgba(16, 24, 40, 0.12);
   border-radius: 26px;
   background: rgba(255, 255, 255, 0.95);
@@ -757,7 +844,7 @@ onBeforeUnmount(() => {
 }
 
 .composer-input :deep(.el-textarea__inner) {
-  min-height: 86px !important;
+  min-height: 68px !important;
   padding: 0;
   border: 0;
   box-shadow: none;
@@ -780,8 +867,8 @@ onBeforeUnmount(() => {
 
 .composer-send-button {
   position: absolute;
-  right: 14px;
-  bottom: 14px;
+  right: 12px;
+  bottom: 12px;
   width: 36px;
   height: 36px;
   border: 0;
