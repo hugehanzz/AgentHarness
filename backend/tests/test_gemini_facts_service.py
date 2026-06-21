@@ -27,6 +27,7 @@ def test_build_gemini_task_facts_identifies_human_gate():
         assert facts.current_gate.owner == "Human Supervisor"
         assert facts.allowed_next_statuses == [TaskStatus.PLAN_CONFIRMED]
         assert facts.safe_next_actions[0].requires_human is True
+        assert len(facts.facts_version) == 64
 
 
 def test_build_gemini_task_facts_summarizes_runs_reviews_and_commands():
@@ -78,3 +79,17 @@ def test_build_gemini_task_facts_summarizes_runs_reviews_and_commands():
         assert facts.review_summary.high_open_count == 1
         assert facts.review_summary.open_items == ["Missing test"]
         assert facts.recent_commands[0].command_key == "backend_tests"
+
+
+def test_gemini_task_facts_version_changes_when_events_change():
+    engine = create_engine("sqlite:///:memory:")
+    SQLModel.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        task = create_task(session, TaskCreate(title="Version", description="Requirement"))
+        first = build_gemini_task_facts(session, task.id)
+
+        transition_task(session, task.id, TaskStatus.PLAN_REQUESTED, "request plan", "tester")
+        second = build_gemini_task_facts(session, task.id)
+
+        assert first.facts_version != second.facts_version

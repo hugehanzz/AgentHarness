@@ -1,3 +1,6 @@
+import hashlib
+import json
+
 from sqlmodel import Session, select
 
 from app.core.state_machine import ALLOWED_TRANSITIONS, HUMAN_GATE_STATUSES, TaskStatus
@@ -59,8 +62,8 @@ def build_gemini_task_facts(session: Session, task_id: int) -> GeminiTaskFacts:
         select(CommandRun).where(CommandRun.task_id == task_id).order_by(CommandRun.created_at.desc()).limit(5)
     ).all()
 
-    return GeminiTaskFacts(
-        task=GeminiTaskFact(
+    payload = {
+        "task": GeminiTaskFact(
             id=task.id,
             title=task.title,
             description=task.description,
@@ -68,9 +71,9 @@ def build_gemini_task_facts(session: Session, task_id: int) -> GeminiTaskFacts:
             status=task.status,
             priority=task.priority,
         ),
-        current_gate=get_current_gate(task.status),
-        allowed_next_statuses=allowed_next_statuses,
-        recent_events=[
+        "current_gate": get_current_gate(task.status),
+        "allowed_next_statuses": allowed_next_statuses,
+        "recent_events": [
             GeminiEventFact(
                 event_type=event.event_type,
                 from_status=event.from_status,
@@ -81,7 +84,7 @@ def build_gemini_task_facts(session: Session, task_id: int) -> GeminiTaskFacts:
             )
             for event in events
         ],
-        latest_agent_runs=[
+        "latest_agent_runs": [
             GeminiAgentRunFact(
                 id=run.id,
                 run_type=run.run_type,
@@ -94,8 +97,8 @@ def build_gemini_task_facts(session: Session, task_id: int) -> GeminiTaskFacts:
             )
             for run in agent_runs
         ],
-        review_summary=build_review_summary(review_items),
-        recent_commands=[
+        "review_summary": build_review_summary(review_items),
+        "recent_commands": [
             GeminiCommandRunFact(
                 id=command.id,
                 command_key=command.command_key,
@@ -106,8 +109,33 @@ def build_gemini_task_facts(session: Session, task_id: int) -> GeminiTaskFacts:
             )
             for command in command_runs
         ],
-        safe_next_actions=build_safe_next_actions(task.status, allowed_next_statuses),
+        "safe_next_actions": build_safe_next_actions(task.status, allowed_next_statuses),
+    }
+
+    return GeminiTaskFacts(
+        facts_version=build_facts_version(payload),
+        **payload,
     )
+
+
+def build_facts_version(payload: dict) -> str:
+    stable_json = json.dumps(
+        normalize_for_hash(payload),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(stable_json.encode("utf-8")).hexdigest()
+
+
+def normalize_for_hash(value):
+    if hasattr(value, "model_dump"):
+        return normalize_for_hash(value.model_dump(mode="json"))
+    if isinstance(value, dict):
+        return {key: normalize_for_hash(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [normalize_for_hash(item) for item in value]
+    return value
 
 
 def get_current_gate(status: TaskStatus) -> GeminiGateFact | None:

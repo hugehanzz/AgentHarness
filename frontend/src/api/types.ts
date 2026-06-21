@@ -72,3 +72,25 @@ export interface AgentRun {
   finished_at: string | null
   created_at: string
 }
+
+export interface GeminiGateFact {
+  type: string
+  owner: string
+  reason: string
+  blocks_auto_advance: boolean
+}
+
+export interface GeminiTaskBrief {
+  ok: boolean
+  model: string
+  facts_version: string
+  summary: string
+  current_position: string
+  pending_gate: GeminiGateFact | null
+  suggested_next_steps: string[]
+  risk_notes: string[]
+}
+
+export interface GeminiTaskFacts {
+  facts_version: string
+}

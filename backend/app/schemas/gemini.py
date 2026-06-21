@@ -80,6 +80,7 @@ class GeminiSafeNextAction(BaseModel):
 
 
 class GeminiTaskFacts(BaseModel):
+    facts_version: str
     task: GeminiTaskFact
     current_gate: GeminiGateFact | None
     allowed_next_statuses: list[TaskStatus]
@@ -88,3 +89,14 @@ class GeminiTaskFacts(BaseModel):
     review_summary: GeminiReviewSummary
     recent_commands: list[GeminiCommandRunFact]
     safe_next_actions: list[GeminiSafeNextAction]
+
+
+class GeminiTaskBrief(BaseModel):
+    ok: bool = True
+    model: str
+    facts_version: str
+    summary: str
+    current_position: str
+    pending_gate: GeminiGateFact | None
+    suggested_next_steps: list[str]
+    risk_notes: list[str]

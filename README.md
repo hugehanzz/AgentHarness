@@ -216,6 +216,7 @@ Gemini 会分阶段从系统秘书升级为流程协调员，核心原则是：G
 - `/tasks/{task_id}/agent-runs`：查看和启动 AgentRun。
 - `/tasks/{task_id}/prompts/preview`：预览将发送给 agent 的提示词。
 - `/gemini/tasks/{task_id}/facts`：为 Gemini Secretary 构建只读任务事实包。
+- `/gemini/tasks/{task_id}/brief`：调用 Gemini Secretary 生成结构化任务简报。
 - `/reviews`：读取并解析 workspace 中的 `REVIEW.md`。
 - `/commands`：运行已注册安全命令。
 - `/filesystem`：选择 workspace 路径。
