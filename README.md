@@ -104,6 +104,7 @@ models/{model}:streamGenerateContent?alt=sse
 ```env
 GEMINI_API_KEY=<your-gemini-api-key>
 GEMINI_MODEL=gemini-3.1-flash-lite
+GEMINI_BASE_URL=https://generativelanguage.googleapis.com
 GEMINI_PROXY_URL=http://127.0.0.1:7890
 ```
 
@@ -301,6 +302,7 @@ CODEX_APP_SERVER_COMMAND=D:\NodeJS\codex.cmd app-server
 AGENT_CLAUDE_COMMAND=C:\Users\<you>\.local\bin\claude.exe
 GEMINI_API_KEY=<your-gemini-api-key>
 GEMINI_MODEL=gemini-3.1-flash-lite
+GEMINI_BASE_URL=https://generativelanguage.googleapis.com
 GEMINI_PROXY_URL=http://127.0.0.1:7890
 APP_TIMEZONE=Asia/Shanghai
 ```

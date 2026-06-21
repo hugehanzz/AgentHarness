@@ -9,21 +9,13 @@ from app.core.config import get_settings
 from app.schemas.gemini import GeminiTextResponse
 
 
-def build_gemini_openai_base_url(base_url: str) -> str:
-    return f"{base_url.rstrip('/')}/v1beta/openai/"
-
-
 def build_gemini_native_model_url(base_url: str, model: str, action: str) -> str:
     normalized_model = model.removeprefix("models/")
     return f"{base_url.rstrip('/')}/v1beta/models/{quote(normalized_model, safe='')}:{action}"
 
 
-def resolve_gemini_base_url(proxy_url: str | None, google_gemini_base_url: str | None, gemini_openai_base_url: str) -> str:
-    if proxy_url:
-        return gemini_openai_base_url
-    if not google_gemini_base_url:
-        raise HTTPException(status_code=400, detail="GOOGLE_GEMINI_BASE_URL is not configured")
-    return google_gemini_base_url
+def resolve_gemini_base_url(gemini_base_url: str, google_gemini_base_url: str | None = None) -> str:
+    return (google_gemini_base_url or gemini_base_url).rstrip("/")
 
 
 def build_gemini_native_payload(prompt: str) -> dict[str, Any]:
@@ -64,9 +56,8 @@ async def generate_gemini_text(prompt: str) -> GeminiTextResponse:
     if not settings.gemini_api_key:
         raise HTTPException(status_code=400, detail="GEMINI_API_KEY is not configured")
     base_url = resolve_gemini_base_url(
-        settings.gemini_proxy_url,
+        settings.gemini_base_url,
         settings.google_gemini_base_url,
-        settings.gemini_openai_base_url,
     )
 
     try:

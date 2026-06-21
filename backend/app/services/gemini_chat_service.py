@@ -146,9 +146,8 @@ async def stream_gemini_chat(messages: list[dict[str, str]], facts_version: str 
 
     try:
         base_url = resolve_gemini_base_url(
-            settings.gemini_proxy_url,
+            settings.gemini_base_url,
             settings.google_gemini_base_url,
-            settings.gemini_openai_base_url,
         )
         url = build_native_stream_url(base_url, settings.gemini_model)
         async with httpx.AsyncClient(proxy=settings.gemini_proxy_url, timeout=settings.gemini_timeout_seconds) as client:

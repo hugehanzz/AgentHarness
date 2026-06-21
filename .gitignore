@@ -1,6 +1,7 @@
 # Python
 __pycache__/
 *.py[cod]
+*.egg-info/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
@@ -10,6 +11,7 @@ venv/
 # Backend
 backend/.env
 backend/*.db
+backend/*.log
 backend/tmp/
 
 # Frontend

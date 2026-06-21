@@ -20,10 +20,16 @@ conda activate agentharness
 
 ## Configuration
 
-Copy `.env.example` to `.env` and update `DATABASE_URL`.
+Copy `.env.example` to `.env` and update `DATABASE_URL` plus local agent settings as needed.
 
 ```env
 DATABASE_URL=mysql+pymysql://agentharness:agentharness@localhost:3306/agentharness
+CODEX_APP_SERVER_COMMAND=codex app-server
+AGENT_CLAUDE_COMMAND=
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-3.1-flash-lite
+GEMINI_BASE_URL=https://generativelanguage.googleapis.com
+GEMINI_PROXY_URL=
 ```
 
 Create the MySQL database before first run:
