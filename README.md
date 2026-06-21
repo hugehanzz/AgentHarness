@@ -2,7 +2,7 @@
 
 AgentHarness 是一个本地运行、由 Human Supervisor 监督的多 Agent 研发工作流控制台。项目目标是把“需求 -> 计划 -> 开发 -> [ 评审 -> 修复 -> 复审 ] -> 验收 -> 归档”的研发链路产品化，让 Codex、Claude 等本地 Agent 在可观测、可追溯、可人工介入的流程中协作。
 
-当前版本不直接调用 OpenAI、Claude、DeepSeek 或 Gemini 云端 API，而是通过本机 Codex App Server 和 Claude CLI 接入受控 worker。AgentHarness 负责流程编排、状态机、提示词构建、证据保存、人类门禁和前端操作台；真正的代码生成和评审动作发生在用户选择的业务项目 workspace 中。
+当前版本不直接调用 OpenAI、Claude 或 DeepSeek 云端 API，而是通过本机 Codex App Server 和 Claude CLI 接入受控 worker；Gemini 作为系统内部秘书能力，通过受控后端服务调用 Gemini 原生 API。AgentHarness 负责流程编排、状态机、提示词构建、证据保存、人类门禁和前端操作台；真正的代码生成和评审动作发生在用户选择的业务项目 workspace 中。
 
 ## 当前架构
 
@@ -11,12 +11,13 @@ AgentHarness 是一个本地运行、由 Human Supervisor 监督的多 Agent 研
 - 测试数据库：后端测试使用 SQLite，不依赖 MySQL。
 - 运行数据库：MySQL。
 - 本地 Agent 接入：Codex App Server、Claude CLI。
+- 系统内部 AI：Gemini Secretary，通过后端调用 Gemini 原生 API。
 
 当前真正作为 AgentWorker 登记的只有三个：
 
 - `Codex`：生成计划、执行开发、修复问题、生成验收建议、维护 `README.md` 归档文档。
 - `Claude`：执行代码评审和复审，并维护被评审业务项目的 `REVIEW.md`。
-- `Gemini`：计划中的第三个 agent，定位为 AgentHarness 的“秘书”，负责使用提醒、进度摘要、门禁提示和安全流程推进建议。它不能替代 Human Supervisor 批准计划、依赖、验收或高风险修复。
+- `Gemini`：第三个 agent，当前定位为 AgentHarness 的“秘书”，负责使用提醒、进度摘要、门禁提示、任务事实问答和安全流程推进建议。它不能替代 Human Supervisor 批准计划、依赖、验收或高风险修复。
 
 ## 设计特点
 
@@ -185,6 +186,21 @@ Agent Runs 刷新规则：
 
 Gemini 会分阶段从系统秘书升级为流程协调员，核心原则是：Gemini 读取后端提供的事实，可以总结和提出动作建议，但不能直接修改状态机，也不能绕过 Human Supervisor gate。
 
+### Current Status
+
+- 后端已接入 Gemini 原生 API，而不是 OpenAI-compatible 路径：
+  - 非流式文本调用使用 `models/{model}:generateContent`。
+  - 对话流式调用使用 `models/{model}:streamGenerateContent?alt=sse`。
+- Gemini API key 从 `GEMINI_API_KEY` 读取；本地代理可通过 `GEMINI_PROXY_URL` 配置，例如 `http://127.0.0.1:7890`。
+- 任务详情页已具备 Gemini Secretary 对话框：
+  - 点击 Gemini 悬浮图标打开对话框。
+  - 打开任务详情页时，Gemini brief 会基于 `facts_version` 缓存；关键阶段会后台预热，避免点击后空白等待。
+  - 用户输入后，后端通过 SSE 返回 Gemini 回复，前端按 delta 实时刷新消息气泡。
+  - 任务状态变化时，任务详情页会清理该任务下的人类聊天消息，避免旧上下文污染新阶段。
+- 首页点击 Gemini 悬浮图标也会打开同款对话框，默认展示固定问候“你好，我是Gemini~”；首页刷新或关闭 Gemini 对话框时，会清空首页人类消息。
+- 前端当前有三个可拖动悬浮 agent 图标：Codex、Claude、Gemini。它们保持独立拖动，并带有防重叠推开约束。
+- Gemini 当前仍是 Secretary Mode：可以总结、解释、问答和建议，但不触发 worker run、不修改任务状态、不批准计划、不批准验收。
+
 ### Stage 1: Secretary Mode
 
 - 后端从任务状态、事件、AgentRun、ReviewItem、CommandRun、gate 和允许流转中构建只读事实包。
@@ -215,8 +231,12 @@ Gemini 会分阶段从系统秘书升级为流程协调员，核心原则是：G
 - `/tasks`：创建、列表、详情、状态流转、更新需求。
 - `/tasks/{task_id}/agent-runs`：查看和启动 AgentRun。
 - `/tasks/{task_id}/prompts/preview`：预览将发送给 agent 的提示词。
+- `/gemini/test`：验证 Gemini 原生 API 非流式文本调用。
+- `/gemini/chat/stream`：首页 Gemini 对话流式回复。
+- `/gemini/chat/diagnostic-stream`：不调用 Gemini 的 SSE 诊断流，用于排查前端/代理是否支持逐段刷新。
 - `/gemini/tasks/{task_id}/facts`：为 Gemini Secretary 构建只读任务事实包。
 - `/gemini/tasks/{task_id}/brief`：调用 Gemini Secretary 生成结构化任务简报。
+- `/gemini/tasks/{task_id}/chat/stream`：任务详情页 Gemini 对话流式回复，基于当前任务 facts 生成上下文。
 - `/reviews`：读取并解析 workspace 中的 `REVIEW.md`。
 - `/commands`：运行已注册安全命令。
 - `/filesystem`：选择 workspace 路径。
@@ -280,6 +300,9 @@ DATABASE_URL=mysql+pymysql://root:123456@localhost:3306/agentharness
 AGENT_TIMEOUT_SECONDS=600
 CODEX_APP_SERVER_COMMAND=D:\NodeJS\codex.cmd app-server
 AGENT_CLAUDE_COMMAND=C:\Users\<you>\.local\bin\claude.exe
+GEMINI_API_KEY=<your-gemini-api-key>
+GEMINI_MODEL=gemini-3.1-flash-lite
+GEMINI_PROXY_URL=http://127.0.0.1:7890
 APP_TIMEZONE=Asia/Shanghai
 ```
 
@@ -334,7 +357,9 @@ npm run build
 
 ## 当前限制
 
-- Gemini 已具备 API 连通性验证和只读 task facts 构建能力，但尚未接入前端 Secretary UI，也尚未具备自动调度权限。
+- Gemini 已接入前端 Secretary UI、任务 brief、首页/任务详情页对话框和原生 API 流式回复，但尚未具备自动调度权限。
+- Gemini 对话目前是前端会话级缓存；尚未持久化聊天记录到数据库。
+- Gemini 流式回复已经按 SSE delta 实时刷新前端，但首包时间仍取决于 Gemini 服务、代理节点和模型响应速度。
 - Codex / Claude 仍依赖本机 Codex App Server 和 Claude CLI；Gemini 通过受控后端服务调用，不能绕过后端 policy 或 Human Supervisor gate。
 - Human Supervisor 门禁保持人工决策。
 - Safe Commands 只允许白名单命令。
