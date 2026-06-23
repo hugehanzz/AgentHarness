@@ -21,7 +21,6 @@ def build_prompt(task: Task, prompt_type: PromptType) -> str:
         PromptType.CLAUDE_RECHECK: (
             "复查修复结果，并在 REVIEW.md 中更新复查结论。"
             "即使本轮没有 Codex 修复项，也要根据 CLAUDE.md 的 REVIEW.md 维护规范执行封版，"
-            "将本轮当前审查任务和当前模块复审记录的完成结论压缩进入历史审查归档，"
             "同步更新机器可读状态，并明确是否可以进入验收。"
         ),
         PromptType.ACCEPTANCE_CHECKLIST: (

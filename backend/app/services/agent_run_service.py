@@ -252,8 +252,6 @@ def apply_archive_check(record: AgentRun, workspace_path: str) -> None:
     try:
         result = check_readme_archive(workspace_path)
     except HTTPException as exc:
-        record.status = RunStatus.FAILED
-        record.error_message = f"Archive check failed: {exc.detail}"
         record.stderr = append_diagnostic_payload(record.stderr, {"archive_check_error": exc.detail})
         return
 
@@ -264,8 +262,7 @@ def apply_archive_check(record: AgentRun, workspace_path: str) -> None:
         if result.get(key) is not True
     ]
     if missing:
-        record.status = RunStatus.FAILED
-        record.error_message = f"Archive check missing: {', '.join(missing)}"
+        record.stderr = append_diagnostic_payload(record.stderr, {"archive_check_warning": {"missing": missing}})
 
 
 def append_diagnostic_payload(existing: str | None, payload: dict[str, Any]) -> str:

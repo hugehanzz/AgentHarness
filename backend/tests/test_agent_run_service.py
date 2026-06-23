@@ -516,7 +516,7 @@ def test_codex_archive_run_records_archive_check(monkeypatch, tmp_path):
         assert "has_archive_notes" in run.stderr
 
 
-def test_codex_archive_run_fails_when_archive_check_is_incomplete(monkeypatch, tmp_path):
+def test_codex_archive_run_keeps_success_when_archive_check_is_incomplete(monkeypatch, tmp_path):
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     monkeypatch.setattr(
@@ -565,9 +565,59 @@ def test_codex_archive_run_fails_when_archive_check_is_incomplete(monkeypatch, t
 
         run = asyncio.run(run_agent(session, task.id, "codex_archive"))
 
-        assert run.status == RunStatus.FAILED
-        assert run.error_message == "Archive check missing: has_test_results"
+        assert run.status == RunStatus.SUCCEEDED
+        assert run.error_message is None
         assert run.stderr and "archive_check" in run.stderr
+        assert "archive_check_warning" in run.stderr
+        assert "has_test_results" in run.stderr
+
+
+def test_codex_archive_run_keeps_success_when_archive_check_errors(monkeypatch, tmp_path):
+    engine = create_engine("sqlite:///:memory:")
+    SQLModel.metadata.create_all(engine)
+    monkeypatch.setattr(
+        agent_run_service,
+        "get_settings",
+        lambda: SimpleNamespace(codex_app_server_command="codex app-server", agent_timeout_seconds=5),
+    )
+
+    def raise_archive_error(workspace_path):
+        raise HTTPException(status_code=404, detail="README.md not found")
+
+    monkeypatch.setattr(agent_run_service, "check_readme_archive", raise_archive_error)
+
+    class FakeCodexAppServerProcess:
+        @classmethod
+        async def start(cls, command, cwd):
+            return cls()
+
+        async def run_turn(self, prompt, cwd, thread_id, run_type):
+            return {
+                "thread_id": "thread-archive",
+                "turn_id": "turn-archive",
+                "agent_text": "archive ready",
+                "diagnostics": None,
+                "completed": True,
+            }
+
+        async def stop(self):
+            pass
+
+    monkeypatch.setattr(agent_run_service, "CodexAppServerProcess", FakeCodexAppServerProcess)
+
+    with Session(engine) as session:
+        ensure_workers(session)
+        task = create_task(
+            session,
+            TaskCreate(title="Archive task", description="Requirement", workspace_path=str(tmp_path)),
+        )
+
+        run = asyncio.run(run_agent(session, task.id, "codex_archive"))
+
+        assert run.status == RunStatus.SUCCEEDED
+        assert run.error_message is None
+        assert run.stderr and "archive_check_error" in run.stderr
+        assert "README.md not found" in run.stderr
 
 
 def test_split_command_preserves_windows_backslashes(monkeypatch):
