@@ -438,6 +438,27 @@ body {
   transform: translateX(31px);
 }
 
+.workflow-mode-pill {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.workflow-mode-secretary {
+  color: #475467;
+  background: #eef2f3;
+}
+
+.workflow-mode-coordinator {
+  color: #087443;
+  background: #dff8e8;
+}
+
 .primary-action {
   width: 100%;
   min-height: 38px;

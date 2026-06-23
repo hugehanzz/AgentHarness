@@ -95,6 +95,10 @@ function flowStageClass(status: TaskStatus) {
   return flowStageLabel(status) === 'Done' ? 'status-stage-done' : 'status-stage-active'
 }
 
+function workflowModeLabel(mode: 'secretary' | 'coordinator') {
+  return mode === 'coordinator' ? 'Coordinator' : 'Secretary'
+}
+
 function formatTimestamp(value: string) {
   return value.replace('T', ' ')
 }
@@ -149,7 +153,7 @@ onMounted(() => {
             </el-form-item>
             <div class="workflow-mode-row">
               <div>
-                <div class="workflow-mode-title">Workflow Mode</div>
+                <div class="workflow-mode-title"></div>
                 <div class="workflow-mode-subtitle">
                   {{ form.coordinator_mode ? 'Coordinator: Gemini may propose automatic flow actions' : 'Secretary: Gemini only suggests next steps' }}
                 </div>
@@ -231,6 +235,13 @@ onMounted(() => {
             <el-table-column label="Status" min-width="190">
               <template #default="{ row }">
                 <span :class="['status-pill', flowStageClass(row.status)]">{{ flowStageLabel(row.status) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="Workflow Mode" min-width="170">
+              <template #default="{ row }">
+                <span :class="['workflow-mode-pill', `workflow-mode-${row.mode}`]">
+                  {{ workflowModeLabel(row.mode) }}
+                </span>
               </template>
             </el-table-column>
             <el-table-column label="Updated" min-width="180">
