@@ -55,11 +55,30 @@ def has_successful_acceptance_checklist(session: Session, task_id: int) -> bool:
     return run is not None
 
 
+def has_successful_claude_recheck(session: Session, task_id: int) -> bool:
+    run = session.exec(
+        select(AgentRun)
+        .where(
+            AgentRun.task_id == task_id,
+            AgentRun.run_type == "claude_recheck",
+            AgentRun.status == RunStatus.SUCCEEDED,
+        )
+        .order_by(AgentRun.created_at.desc())
+    ).first()
+    return run is not None
+
+
 def transition_task(session: Session, task_id: int, to_status: TaskStatus, message: str | None, created_by: str) -> Task:
     task = get_task_or_404(session, task_id)
     from_status = task.status
     if not can_transition(from_status, to_status):
         raise HTTPException(status_code=400, detail=f"Invalid transition: {from_status} -> {to_status}")
+    if (
+        from_status == TaskStatus.REVIEW_DONE
+        and to_status == TaskStatus.ACCEPTANCE_READY
+        and not has_successful_claude_recheck(session, task.id)
+    ):
+        raise HTTPException(status_code=400, detail="Claude recheck must finalize REVIEW.md before acceptance")
     # Guard the final acceptance gate with evidence, not just a button click.
     if (
         from_status == TaskStatus.ACCEPTANCE_READY

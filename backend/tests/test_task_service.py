@@ -64,6 +64,44 @@ def test_acceptance_pass_requires_successful_codex_checklist():
         assert "acceptance checklist" in exc_info.value.detail
 
 
+def test_review_done_to_acceptance_requires_successful_claude_recheck():
+    engine = create_engine("sqlite:///:memory:")
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        task = create_task(session, TaskCreate(title="Review task", description="Requirement"))
+        task.status = TaskStatus.REVIEW_DONE
+        session.add(task)
+        session.commit()
+
+        with pytest.raises(HTTPException) as exc_info:
+            transition_task(session, task.id, TaskStatus.ACCEPTANCE_READY, "acceptance", "tester")
+
+        assert exc_info.value.status_code == 400
+        assert "Claude recheck" in exc_info.value.detail
+
+
+def test_review_done_to_acceptance_allows_successful_claude_recheck():
+    engine = create_engine("sqlite:///:memory:")
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        task = create_task(session, TaskCreate(title="Review task", description="Requirement"))
+        task.status = TaskStatus.REVIEW_DONE
+        session.add(task)
+        session.add(
+            AgentRun(
+                task_id=task.id,
+                run_type="claude_recheck",
+                provider_type="claude_cli",
+                status=RunStatus.SUCCEEDED,
+            )
+        )
+        session.commit()
+
+        updated = transition_task(session, task.id, TaskStatus.ACCEPTANCE_READY, "acceptance", "tester")
+
+        assert updated.status == TaskStatus.ACCEPTANCE_READY
+
+
 def test_acceptance_pass_allows_successful_codex_checklist():
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)

@@ -18,7 +18,12 @@ def build_prompt(task: Task, prompt_type: PromptType) -> str:
         PromptType.CODEX_IMPLEMENT: "按照已确认的计划执行开发，运行相关测试。",
         PromptType.CLAUDE_REVIEW: "评审Codex的本次代码实现并维护 REVIEW.md。按 High、Medium、Low 严重级别归类问题，并包含开放事项和复查结论。",
         PromptType.CODEX_FIX: "读取 REVIEW.md，修复Claude审查的问题，运行相关验证，并总结变更内容。不要修改 REVIEW.md。",
-        PromptType.CLAUDE_RECHECK: "复查修复结果，并在 REVIEW.md 中更新复查结论。请明确是否可以进入验收。",
+        PromptType.CLAUDE_RECHECK: (
+            "复查修复结果，并在 REVIEW.md 中更新复查结论。"
+            "即使本轮没有 Codex 修复项，也要根据 CLAUDE.md 的 REVIEW.md 维护规范执行封版，"
+            "将本轮当前审查任务和当前模块复审记录的完成结论压缩进入历史审查归档，"
+            "同步更新机器可读状态，并明确是否可以进入验收。"
+        ),
         PromptType.ACCEPTANCE_CHECKLIST: (
             "为 Human Supervisor 生成面向人工操作的验收建议。不要替人类宣布验收通过。"
             "请根据任务需求、实现阶段输出、REVIEW.md/复审结论、测试或命令证据，给出具体可执行的验收方式："

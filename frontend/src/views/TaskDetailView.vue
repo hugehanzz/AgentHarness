@@ -277,7 +277,7 @@ function refreshAgentRuns() {
   agentRunsRefreshKey.value += 1
 }
 
-async function runAgentByType(runType: string, promptOverride?: string | null) {
+async function runAgentByType(runType: string, promptOverride?: string | null): Promise<AgentRun> {
   refreshAgentRuns()
   const payload: { run_type: string; prompt_override?: string } = { run_type: runType }
   if (promptOverride?.trim()) {
@@ -286,6 +286,7 @@ async function runAgentByType(runType: string, promptOverride?: string | null) {
   try {
     const { data } = await api.post<AgentRun>(`/tasks/${taskId}/agent-runs`, payload)
     ElMessage.success(`${runType} finished with ${data.status}`)
+    return data
   } finally {
     refreshAgentRuns()
   }
@@ -331,6 +332,12 @@ async function transition(toStatus: TaskStatus) {
   flowActionRunning.value = toStatus
   const previousStatus = store.selectedTask?.status
   try {
+    if (previousStatus === 'REVIEW_DONE' && toStatus === 'ACCEPTANCE_READY') {
+      const recheckRun = await runAgentByType('claude_recheck', promptOverrideForRunType('claude_recheck'))
+      if (recheckRun.status !== 'SUCCEEDED') {
+        throw new Error('Claude Recheck failed; REVIEW.md was not finalized')
+      }
+    }
     await store.transitionTask(taskId, toStatus, `Human Supervisor: ${actionLabel(toStatus)}`)
     if (store.selectedTask?.status && store.selectedTask.status !== previousStatus) {
       refreshAgentRuns()
