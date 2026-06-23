@@ -72,7 +72,7 @@ def build_gemini_task_facts(session: Session, task_id: int) -> GeminiTaskFacts:
             description=task.description,
             workspace_path=task.workspace_path,
             status=task.status,
-            priority=task.priority,
+            mode=task.mode,
         ),
         "current_gate": get_current_gate(task.status),
         "allowed_next_statuses": allowed_next_statuses,

@@ -43,7 +43,7 @@ export const useTasksStore = defineStore('tasks', {
         this.detailLoading = false
       }
     },
-    async createTask(payload: { title: string; description: string; workspace_path?: string }) {
+    async createTask(payload: { title: string; description: string; workspace_path?: string; mode?: 'secretary' | 'coordinator' }) {
       await api.post('/tasks', payload)
       await this.fetchTasks()
     },

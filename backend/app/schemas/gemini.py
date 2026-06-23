@@ -3,7 +3,7 @@ from typing import Literal
 
 from app.core.state_machine import TaskStatus
 from app.models.command import CommandStatus
-from app.models.task import TaskPriority
+from app.models.task import TaskMode
 from app.models.worker import RunStatus
 
 
@@ -34,7 +34,7 @@ class GeminiTaskFact(BaseModel):
     description: str
     workspace_path: str | None
     status: TaskStatus
-    priority: TaskPriority
+    mode: TaskMode
 
 
 class GeminiGateFact(BaseModel):

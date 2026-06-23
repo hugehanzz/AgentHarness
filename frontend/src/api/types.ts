@@ -23,7 +23,7 @@ export interface Task {
   description: string
   workspace_path: string | null
   status: TaskStatus
-  priority: 'LOW' | 'MEDIUM' | 'HIGH'
+  mode: 'secretary' | 'coordinator'
   created_at: string
   updated_at: string
   archived_at: string | null

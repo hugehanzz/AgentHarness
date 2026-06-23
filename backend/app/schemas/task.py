@@ -3,14 +3,14 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict
 
 from app.core.state_machine import TaskStatus
-from app.models.task import TaskPriority
+from app.models.task import TaskMode
 
 
 class TaskCreate(BaseModel):
     title: str
     description: str
     workspace_path: str | None = None
-    priority: TaskPriority = TaskPriority.MEDIUM
+    mode: TaskMode = TaskMode.SECRETARY
 
 
 class TaskRead(BaseModel):
@@ -21,7 +21,7 @@ class TaskRead(BaseModel):
     description: str
     workspace_path: str | None
     status: TaskStatus
-    priority: TaskPriority
+    mode: TaskMode
     created_at: datetime
     updated_at: datetime
     archived_at: datetime | None

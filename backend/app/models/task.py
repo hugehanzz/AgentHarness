@@ -8,10 +8,9 @@ from app.core.state_machine import TaskStatus
 from app.models.common import app_now
 
 
-class TaskPriority(StrEnum):
-    LOW = "LOW"
-    MEDIUM = "MEDIUM"
-    HIGH = "HIGH"
+class TaskMode(StrEnum):
+    SECRETARY = "secretary"
+    COORDINATOR = "coordinator"
 
 
 class Task(SQLModel, table=True):
@@ -20,7 +19,7 @@ class Task(SQLModel, table=True):
     description: str = Field(sa_column=Column(Text))
     workspace_path: str | None = Field(default=None, max_length=1000)
     status: TaskStatus = Field(default=TaskStatus.REQUIREMENT_DRAFT, index=True)
-    priority: TaskPriority = Field(default=TaskPriority.MEDIUM)
+    mode: TaskMode = Field(default=TaskMode.SECRETARY, max_length=32)
     created_at: datetime = Field(default_factory=app_now)
     updated_at: datetime = Field(default_factory=app_now)
     archived_at: datetime | None = None

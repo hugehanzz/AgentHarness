@@ -21,6 +21,7 @@ const form = reactive({
   title: '',
   description: '',
   workspace_path: '',
+  coordinator_mode: false,
 })
 
 async function createTask() {
@@ -32,6 +33,7 @@ async function createTask() {
       title: form.title,
       description: form.description,
       workspace_path: workspacePath || undefined,
+      mode: form.coordinator_mode ? 'coordinator' : 'secretary',
     })
     if (workspacePath) {
       localStorage.setItem(lastWorkspacePathKey, workspacePath)
@@ -41,6 +43,7 @@ async function createTask() {
     form.title = ''
     form.description = ''
     form.workspace_path = ''
+    form.coordinator_mode = false
     taskPage.value = 1
   } catch (error: any) {
     ElMessage.error(error?.response?.data?.detail || error?.message || 'Failed to create workflow')
@@ -144,6 +147,25 @@ onMounted(() => {
             <el-form-item label="Description">
               <el-input v-model="form.description" type="textarea" :rows="7" placeholder="请描述需求背景、目标、约束、风险点和验收标准。" />
             </el-form-item>
+            <div class="workflow-mode-row">
+              <div>
+                <div class="workflow-mode-title">Workflow Mode</div>
+                <div class="workflow-mode-subtitle">
+                  {{ form.coordinator_mode ? 'Coordinator: Gemini may propose automatic flow actions' : 'Secretary: Gemini only suggests next steps' }}
+                </div>
+              </div>
+              <button
+                class="workflow-mode-switch"
+                :class="{ 'is-on': form.coordinator_mode }"
+                type="button"
+                role="switch"
+                :aria-checked="form.coordinator_mode"
+                aria-label="Toggle coordinator mode"
+                @click="form.coordinator_mode = !form.coordinator_mode"
+              >
+                <span></span>
+              </button>
+            </div>
             <el-button
               class="primary-action"
               type="primary"

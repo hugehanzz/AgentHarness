@@ -12,7 +12,7 @@ from app.schemas.gemini import (
 )
 from app.core.state_machine import TaskStatus
 from app.models.command import CommandStatus
-from app.models.task import TaskPriority
+from app.models.task import TaskMode
 from app.models.worker import RunStatus
 from app.services.gemini_chat_service import (
     build_home_chat_messages,
@@ -46,7 +46,7 @@ def make_facts() -> GeminiTaskFacts:
             description="实现一个功能",
             workspace_path="D:/workspace",
             status=TaskStatus.ACCEPTANCE_READY,
-            priority=TaskPriority.MEDIUM,
+            mode=TaskMode.SECRETARY,
         ),
         current_gate=GeminiGateFact(
             type="ACCEPTANCE",

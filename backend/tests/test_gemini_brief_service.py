@@ -2,7 +2,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.core.state_machine import TaskStatus
-from app.models.task import TaskPriority
+from app.models.task import TaskMode
 from app.schemas.gemini import (
     GeminiReviewSummary,
     GeminiTaskFact,
@@ -26,7 +26,7 @@ def make_facts() -> GeminiTaskFacts:
             description="Requirement",
             workspace_path="D:\\workspace",
             status=TaskStatus.IMPLEMENT_DONE,
-            priority=TaskPriority.MEDIUM,
+            mode=TaskMode.SECRETARY,
         ),
         current_gate=None,
         allowed_next_statuses=[TaskStatus.REVIEW_REQUESTED],
