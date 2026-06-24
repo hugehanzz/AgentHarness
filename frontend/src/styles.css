@@ -611,6 +611,30 @@ body {
   border-radius: 7px;
 }
 
+.acceptance-pass-button.is-disabled,
+.acceptance-pass-button.is-disabled:hover,
+.acceptance-pass-button.is-disabled:focus {
+  color: #a3aab5;
+  border-color: #d8dde5;
+  background: #ffffff;
+}
+
+.acceptance-plan-button {
+  order: 1;
+}
+
+.acceptance-plan-button.is-repeat {
+  order: 2;
+}
+
+.acceptance-pass-wrapper {
+  order: 2;
+}
+
+.acceptance-pass-wrapper.is-enabled {
+  order: 1;
+}
+
 .el-input__wrapper,
 .el-textarea__inner,
 .el-select__wrapper {

@@ -138,6 +138,9 @@ def test_build_task_chat_messages_includes_facts_and_guardrails():
 
     assert messages[0]["role"] == "system"
     assert "CURRENT_TASK_FACTS" in messages[0]["content"]
+    assert "ACCEPTANCE_READY" not in messages[0]["content"]
+    assert "workspace_path" not in messages[0]["content"]
+    assert "provider_type" not in messages[0]["content"]
     assert "等待人工验收" in messages[0]["content"]
     assert "不能批准验收" in messages[0]["content"]
 

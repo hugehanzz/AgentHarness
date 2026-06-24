@@ -78,18 +78,18 @@ WORKFLOW_ACTIONS: tuple[WorkflowActionDefinition, ...] = (
         label="标记评审完成",
     ),
     WorkflowActionDefinition(
-        action_id="request_fix_after_review",
-        from_status=TaskStatus.REVIEW_DONE,
-        to_status=TaskStatus.FIX_REQUIRED,
-        label="要求修复",
-    ),
-    WorkflowActionDefinition(
         action_id="enter_acceptance_after_review",
         from_status=TaskStatus.REVIEW_DONE,
         to_status=TaskStatus.ACCEPTANCE_READY,
         label="进入验收",
         agent_run_type="claude_recheck",
         agent_run_timing=AgentRunTiming.BEFORE_TRANSITION,
+    ),
+    WorkflowActionDefinition(
+        action_id="request_fix_after_review",
+        from_status=TaskStatus.REVIEW_DONE,
+        to_status=TaskStatus.FIX_REQUIRED,
+        label="要求修复",
     ),
     WorkflowActionDefinition(
         action_id="start_fix",
@@ -120,16 +120,16 @@ WORKFLOW_ACTIONS: tuple[WorkflowActionDefinition, ...] = (
         label="标记复审完成",
     ),
     WorkflowActionDefinition(
-        action_id="request_fix_after_recheck",
-        from_status=TaskStatus.RECHECK_DONE,
-        to_status=TaskStatus.FIX_REQUIRED,
-        label="要求修复",
-    ),
-    WorkflowActionDefinition(
         action_id="enter_acceptance_after_recheck",
         from_status=TaskStatus.RECHECK_DONE,
         to_status=TaskStatus.ACCEPTANCE_READY,
         label="进入验收",
+    ),
+    WorkflowActionDefinition(
+        action_id="request_fix_after_recheck",
+        from_status=TaskStatus.RECHECK_DONE,
+        to_status=TaskStatus.FIX_REQUIRED,
+        label="要求修复",
     ),
     WorkflowActionDefinition(
         action_id="mark_acceptance_passed",

@@ -1,6 +1,4 @@
-from datetime import datetime
-
-from sqlmodel import Session, select
+from sqlmodel import Session
 
 from app.core.state_machine import HUMAN_GATE_STATUSES, TaskStatus
 from app.core.workflow_actions import (
@@ -9,7 +7,6 @@ from app.core.workflow_actions import (
     get_workflow_actions,
 )
 from app.models.review import ReviewItem, ReviewItemStatus
-from app.models.task import Task, TaskEvent
 from app.models.worker import AgentRun, RunStatus
 from app.schemas.workflow import (
     ResolvedWorkflowAction,
@@ -18,7 +15,10 @@ from app.schemas.workflow import (
     WorkflowActivity,
     WorkflowActivityState,
 )
-from app.services.task_service import get_task_or_404
+from app.services.task_context_service import (
+    WorkflowContextSnapshot,
+    load_workflow_context_snapshot,
+)
 
 
 ACTIVE_AGENT_RUN_BY_STATUS: dict[TaskStatus, str] = {
@@ -73,57 +73,29 @@ STATUS_LABELS: dict[TaskStatus, str] = {
 
 
 def resolve_task_workflow(session: Session, task_id: int) -> ResolvedWorkflowState:
-    task = get_task_or_404(session, task_id)
-    evidence_started_at = get_workflow_evidence_started_at(session, task)
-    agent_runs = get_current_status_agent_runs(session, task, evidence_started_at)
-    review_items = list(session.exec(select(ReviewItem).where(ReviewItem.task_id == task.id)).all())
+    return resolve_task_workflow_snapshot(
+        load_workflow_context_snapshot(session, task_id)
+    )
 
+
+def resolve_task_workflow_snapshot(
+    snapshot: WorkflowContextSnapshot,
+) -> ResolvedWorkflowState:
+    task = snapshot.task
     actions = [
-        resolve_action(action, agent_runs, review_items)
+        resolve_action(
+            action,
+            snapshot.current_status_agent_runs,
+            snapshot.review_items,
+        )
         for action in get_workflow_actions(task.status)
     ]
     return ResolvedWorkflowState(
         task_id=task.id,
         current_status=task.status,
-        activity=resolve_activity(task.status, agent_runs),
+        activity=resolve_activity(task.status, snapshot.current_status_agent_runs),
         actions=actions,
     )
-
-
-def get_workflow_evidence_started_at(session: Session, task: Task) -> datetime | None:
-    status_event = session.exec(
-        select(TaskEvent)
-        .where(
-            TaskEvent.task_id == task.id,
-            TaskEvent.to_status == task.status,
-        )
-        .order_by(TaskEvent.created_at.desc())
-    ).first()
-    requirement_event = session.exec(
-        select(TaskEvent)
-        .where(
-            TaskEvent.task_id == task.id,
-            TaskEvent.event_type == "REQUIREMENT_UPDATED",
-        )
-        .order_by(TaskEvent.created_at.desc())
-    ).first()
-    timestamps = [
-        event.created_at
-        for event in (status_event, requirement_event)
-        if event is not None
-    ]
-    return max(timestamps) if timestamps else None
-
-
-def get_current_status_agent_runs(
-    session: Session,
-    task: Task,
-    entered_at: datetime | None,
-) -> list[AgentRun]:
-    statement = select(AgentRun).where(AgentRun.task_id == task.id)
-    if entered_at is not None:
-        statement = statement.where(AgentRun.created_at >= entered_at)
-    return list(session.exec(statement.order_by(AgentRun.created_at.desc())).all())
 
 
 def resolve_action(

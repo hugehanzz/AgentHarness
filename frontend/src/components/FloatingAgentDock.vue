@@ -401,9 +401,8 @@ async function openGeminiBrief(forceRefresh = false) {
 }
 
 function refreshGeminiBrief() {
-  if (!currentTaskId.value) {
-    clearChatMessages('home')
-  }
+  clearChatMessages()
+  chatDraft.value = ''
   openGeminiBrief(true)
 }
 
@@ -429,9 +428,8 @@ function updateChatMessage(scope: string, id: number, updater: (message: ChatMes
 }
 
 function closeGeminiDialog() {
-  if (!currentTaskId.value) {
-    clearChatMessages('home')
-  }
+  clearChatMessages()
+  chatDraft.value = ''
   briefDialogVisible.value = false
 }
 

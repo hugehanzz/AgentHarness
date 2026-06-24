@@ -8,6 +8,7 @@ import httpx
 
 from app.core.config import get_settings
 from app.schemas.gemini import GeminiChatRequest, GeminiTaskFacts
+from app.services.gemini_context_service import build_gemini_task_context
 from app.services.gemini_service import resolve_gemini_base_url
 
 DELTA_CHUNK_SIZE = 8
@@ -58,7 +59,11 @@ def build_home_chat_messages(payload: GeminiChatRequest) -> list[dict[str, str]]
 
 
 def build_task_chat_messages(facts: GeminiTaskFacts, payload: GeminiChatRequest) -> list[dict[str, str]]:
-    facts_json = facts.model_dump_json(indent=2)
+    context_json = json.dumps(
+        build_gemini_task_context(facts),
+        ensure_ascii=False,
+        indent=2,
+    )
     return [
         {
             "role": "system",
@@ -68,7 +73,7 @@ def build_task_chat_messages(facts: GeminiTaskFacts, payload: GeminiChatRequest)
                 "你不能确认计划、不能批准验收、不能安装依赖、不能绕过 Human Supervisor gate，"
                 "也不能声称已经修改外部业务项目代码。默认用中文回答，保持简短，通常不超过 5 句话。"
                 "如果用户要求回复固定文本、OK、收到、确认等短句，必须严格按用户要求回复，不要展开说明。\n\n"
-                f"CURRENT_TASK_FACTS:\n{facts_json}"
+                f"CURRENT_TASK_FACTS:\n{context_json}"
             ),
         },
         *normalize_history(payload),

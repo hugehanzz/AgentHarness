@@ -1,13 +1,10 @@
 import hashlib
 import json
 
-from sqlmodel import Session, select
+from sqlmodel import Session
 
 from app.core.state_machine import HUMAN_GATE_STATUSES, TaskStatus
-from app.models.command import CommandRun
 from app.models.review import ReviewItem, ReviewItemStatus, ReviewSeverity
-from app.models.task import TaskEvent
-from app.models.worker import AgentRun
 from app.schemas.gemini import (
     GeminiAgentRunFact,
     GeminiCommandRunFact,
@@ -19,8 +16,8 @@ from app.schemas.gemini import (
     GeminiWorkflowGuidance,
 )
 from app.schemas.workflow import ResolvedWorkflowState
-from app.services.task_service import get_task_or_404
-from app.services.workflow_action_service import resolve_task_workflow
+from app.services.task_context_service import load_task_context_snapshot
+from app.services.workflow_action_service import resolve_task_workflow_snapshot
 
 
 MAX_EXCERPT_LENGTH = 700
@@ -59,19 +56,9 @@ STATUS_GUIDANCE: dict[TaskStatus, tuple[str, str, str]] = {
 }
 
 def build_gemini_task_facts(session: Session, task_id: int) -> GeminiTaskFacts:
-    task = get_task_or_404(session, task_id)
-    workflow_state = resolve_task_workflow(session, task_id)
-
-    events = session.exec(
-        select(TaskEvent).where(TaskEvent.task_id == task_id).order_by(TaskEvent.created_at.desc()).limit(8)
-    ).all()
-    agent_runs = session.exec(
-        select(AgentRun).where(AgentRun.task_id == task_id).order_by(AgentRun.created_at.desc()).limit(5)
-    ).all()
-    review_items = session.exec(select(ReviewItem).where(ReviewItem.task_id == task_id)).all()
-    command_runs = session.exec(
-        select(CommandRun).where(CommandRun.task_id == task_id).order_by(CommandRun.created_at.desc()).limit(5)
-    ).all()
+    snapshot = load_task_context_snapshot(session, task_id)
+    task = snapshot.task
+    workflow_state = resolve_task_workflow_snapshot(snapshot)
 
     # Gemini receives a read-only fact package instead of direct database or
     # workspace access. This keeps Secretary answers grounded without giving it
@@ -96,7 +83,7 @@ def build_gemini_task_facts(session: Session, task_id: int) -> GeminiTaskFacts:
                 created_by=event.created_by,
                 created_at=event.created_at.isoformat(),
             )
-            for event in events
+            for event in snapshot.recent_events
         ],
         "latest_agent_runs": [
             GeminiAgentRunFact(
@@ -109,9 +96,9 @@ def build_gemini_task_facts(session: Session, task_id: int) -> GeminiTaskFacts:
                 finished_at=run.finished_at.isoformat() if run.finished_at else None,
                 created_at=run.created_at.isoformat(),
             )
-            for run in agent_runs
+            for run in snapshot.recent_agent_runs
         ],
-        "review_summary": build_review_summary(review_items),
+        "review_summary": build_review_summary(snapshot.review_items),
         "recent_commands": [
             GeminiCommandRunFact(
                 id=command.id,
@@ -121,7 +108,7 @@ def build_gemini_task_facts(session: Session, task_id: int) -> GeminiTaskFacts:
                 duration_ms=command.duration_ms,
                 created_at=command.created_at.isoformat(),
             )
-            for command in command_runs
+            for command in snapshot.recent_commands
         ],
     }
 

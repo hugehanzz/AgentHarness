@@ -102,7 +102,7 @@ const agentRunLabels: Record<string, string> = {
   claude_review: '运行 Claude Review',
   codex_fix: '运行 Codex Fix',
   claude_recheck: '运行 Claude Recheck',
-  codex_acceptance_checklist: '运行 Codex 验收建议',
+  codex_acceptance_checklist: 'Codex 给出验收方案',
   codex_archive: '运行 Codex Archive',
 }
 
@@ -383,6 +383,18 @@ onMounted(() => {
         </div>
 
         <div class="copy-row" style="margin-top: 16px;">
+          <el-button
+            v-if="currentAgentRunType === 'codex_acceptance_checklist'"
+            class="acceptance-plan-button"
+            :class="{ 'is-repeat': store.workflow?.activity.run_status === 'SUCCEEDED' }"
+            :type="store.workflow?.activity.run_status === 'SUCCEEDED' ? 'default' : 'primary'"
+            :icon="currentAgentButtonIcon"
+            :loading="currentAgentRunning"
+            :disabled="Boolean(flowActionRunning) || currentAgentRunning"
+            @click="runCurrentAgent"
+          >
+            {{ agentRunLabels[currentAgentRunType] }}
+          </el-button>
           <el-tooltip
             v-for="action in workflowActions"
             :key="action.action_id"
@@ -390,8 +402,14 @@ onMounted(() => {
             :disabled="!action.blocked_reason"
             placement="top"
           >
-            <span>
+            <span
+              :class="{
+                'acceptance-pass-wrapper': action.to_status === 'ACCEPTANCE_PASSED',
+                'is-enabled': action.to_status === 'ACCEPTANCE_PASSED' && action.enabled,
+              }"
+            >
               <el-button
+                :class="{ 'acceptance-pass-button': action.to_status === 'ACCEPTANCE_PASSED' }"
                 :type="flowButtonType(action)"
                 :icon="flowButtonIcon(action)"
                 :loading="flowActionRunning === action.action_id"
@@ -403,7 +421,7 @@ onMounted(() => {
             </span>
           </el-tooltip>
           <el-button
-            v-if="currentAgentRunType"
+            v-if="currentAgentRunType && currentAgentRunType !== 'codex_acceptance_checklist'"
             :icon="currentAgentButtonIcon"
             :loading="currentAgentRunning"
             :disabled="Boolean(flowActionRunning) || currentAgentRunning"
