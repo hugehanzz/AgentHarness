@@ -5,6 +5,7 @@ from app.core.state_machine import TaskStatus
 from app.models.command import CommandStatus
 from app.models.task import TaskMode
 from app.models.worker import RunStatus
+from app.schemas.workflow import ResolvedWorkflowAction, WorkflowActivity
 
 
 class GeminiTestRequest(BaseModel):
@@ -83,23 +84,23 @@ class GeminiCommandRunFact(BaseModel):
     created_at: str
 
 
-class GeminiSafeNextAction(BaseModel):
-    type: str
-    label: str
-    requires_human: bool
-    reason: str
+class GeminiWorkflowGuidance(BaseModel):
+    current_stage_label: str
+    current_status_label: str
+    current_position: str
+    activity: WorkflowActivity
+    available_user_actions: list[ResolvedWorkflowAction]
 
 
 class GeminiTaskFacts(BaseModel):
     facts_version: str
     task: GeminiTaskFact
     current_gate: GeminiGateFact | None
-    allowed_next_statuses: list[TaskStatus]
+    workflow_guidance: GeminiWorkflowGuidance
     recent_events: list[GeminiEventFact]
     latest_agent_runs: list[GeminiAgentRunFact]
     review_summary: GeminiReviewSummary
     recent_commands: list[GeminiCommandRunFact]
-    safe_next_actions: list[GeminiSafeNextAction]
 
 
 class GeminiTaskBrief(BaseModel):

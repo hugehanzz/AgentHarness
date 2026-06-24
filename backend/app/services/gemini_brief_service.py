@@ -3,9 +3,13 @@ import re
 
 from fastapi import HTTPException
 
+from app.core.state_machine import TaskStatus
 from app.schemas.gemini import GeminiTaskBrief, GeminiTaskFacts
 from app.services.gemini_service import generate_gemini_text
 
+
+MAX_GENERATION_ATTEMPTS = 2
+INTERNAL_TERMS = tuple(status.value for status in TaskStatus)
 
 BRIEF_JSON_SCHEMA = """{
   "summary": "string, concise Chinese summary of current task progress",
@@ -22,47 +26,223 @@ BRIEF_JSON_SCHEMA = """{
 
 
 def build_gemini_secretary_prompt(facts: GeminiTaskFacts) -> str:
-    facts_json = facts.model_dump_json(indent=2)
-    return f"""你是 AgentHarness 的 Gemini Secretary，是系统内部只读 AI 秘书。
+    context_json = json.dumps(
+        build_gemini_brief_context(facts),
+        ensure_ascii=False,
+        indent=2,
+    )
+    return f"""你是 AgentHarness 的只读 Gemini 秘书。仅根据 CONTEXT 生成面向用户的任务简报。
 
-你的职责：
-- 总结当前任务进度。
-- 解释任务当前处于哪个流程位置。
-- 提醒 Human Supervisor 是否存在 pending gate。
-- 根据 backend 提供的 safe_next_actions 给出安全下一步建议。
-- 提醒风险和边界。
+规则：
+1. 使用简体中文，不展示内部枚举、action_id 或 run_type。
+2. 下一步只使用 actions 中的真实按钮名称。
+3. 优先建议 enabled=true 且 recommended=true 的动作；没有推荐动作时才使用其他已启用动作。
+4. enabled=false 的动作只能解释 blocked_reason，不能建议点击。
+5. 点击结果只能复述 side_effects，不得声称已经执行、批准或完成未发生的流程。
+6. pending_gate 必须原样使用 gate；gate 为 null 时也必须输出 null。Gemini 不能代替人工批准。
+7. 只输出一个 JSON object，不要输出 Markdown、代码块或额外文字。
 
-严格限制：
-- 你不能声称已经推进状态。
-- 你不能批准计划。
-- 你不能批准最终验收。
-- 你不能安装依赖。
-- 你不能执行命令。
-- 你不能修改外部业务项目代码。
-- 你不能绕过 Human Supervisor gate。
-- 你只能基于下面的 task facts 回答，不能编造系统中不存在的事实。
-
-输出要求：
-- 只输出一个 JSON object。
-- 不要输出 Markdown。
-- 不要输出代码块。
-- 不要输出 JSON 外的解释文字。
-- 使用简体中文。
-- JSON 结构必须符合：
+JSON 结构：
 {BRIEF_JSON_SCHEMA}
 
-task facts:
-{facts_json}
+CONTEXT:
+{context_json}
 """
 
 
+def build_gemini_brief_context(facts: GeminiTaskFacts) -> dict:
+    guidance = facts.workflow_guidance
+    return {
+        "task": {
+            "title": facts.task.title,
+            "description": facts.task.description,
+            "mode": facts.task.mode.value,
+        },
+        "workflow": {
+            "stage": guidance.current_stage_label,
+            "status": guidance.current_status_label,
+            "position": guidance.current_position,
+            "activity": guidance.activity.message,
+        },
+        "gate": facts.current_gate.model_dump(mode="json") if facts.current_gate else None,
+        "actions": [
+            {
+                "label": action.label,
+                "enabled": action.enabled,
+                "recommended": action.recommended,
+                "requires_human_gate": action.requires_human_gate,
+                "instruction": action.instruction,
+                "side_effects": action.side_effects,
+                "blocked_reason": action.blocked_reason,
+            }
+            for action in guidance.available_user_actions
+        ],
+        "review": facts.review_summary.model_dump(mode="json"),
+        "recent_agent_results": [
+            {
+                "status": run.status.value,
+                "output_excerpt": run.output_excerpt,
+                "error_message": run.error_message,
+            }
+            for run in facts.latest_agent_runs[:3]
+        ],
+        "recent_command_results": [
+            {
+                "status": command.status.value,
+                "exit_code": command.exit_code,
+            }
+            for command in facts.recent_commands[:3]
+        ],
+    }
+
+
 async def generate_gemini_task_brief(facts: GeminiTaskFacts) -> GeminiTaskBrief:
-    response = await generate_gemini_text(build_gemini_secretary_prompt(facts))
-    payload = parse_gemini_brief_json(response.text)
+    prompt = build_gemini_secretary_prompt(facts)
+    last_model = "backend-fallback"
+    validation_errors: list[str] = []
+
+    for attempt in range(MAX_GENERATION_ATTEMPTS):
+        retry_prompt = prompt
+        if validation_errors:
+            retry_prompt += build_validation_retry_instruction(validation_errors)
+
+        response = await generate_gemini_text(retry_prompt)
+        last_model = response.model
+        try:
+            payload = parse_gemini_brief_json(response.text)
+            brief = build_brief(payload, facts, response.model)
+        except (HTTPException, ValueError) as exc:
+            validation_errors = [str(getattr(exc, "detail", exc))]
+            continue
+
+        validation_errors = validate_gemini_brief(brief, facts)
+        if not validation_errors:
+            return brief
+
+    return build_fallback_brief(facts, last_model)
+
+
+def build_brief(payload: dict, facts: GeminiTaskFacts, model: str) -> GeminiTaskBrief:
     payload["ok"] = True
-    payload["model"] = response.model
+    payload["model"] = model
     payload["facts_version"] = facts.facts_version
     return GeminiTaskBrief.model_validate(payload)
+
+
+def validate_gemini_brief(
+    brief: GeminiTaskBrief,
+    facts: GeminiTaskFacts,
+) -> list[str]:
+    errors: list[str] = []
+    all_text = "\n".join(
+        [
+            brief.summary,
+            brief.current_position,
+            *brief.suggested_next_steps,
+            *brief.risk_notes,
+        ]
+    )
+    exposed_terms = [term for term in INTERNAL_TERMS if term in all_text]
+    if exposed_terms:
+        errors.append(f"不得向用户展示内部状态枚举：{', '.join(exposed_terms)}")
+
+    actions = facts.workflow_guidance.available_user_actions
+    enabled_actions = [action for action in actions if action.enabled]
+    disabled_actions = [action for action in actions if not action.enabled]
+    recommended_actions = [action for action in enabled_actions if action.recommended]
+    steps_text = "\n".join(brief.suggested_next_steps)
+
+    for action in disabled_actions:
+        if action.label in steps_text and contains_click_instruction(steps_text):
+            errors.append(f"不得建议点击尚未启用的按钮「{action.label}」")
+
+    expected_actions = recommended_actions or enabled_actions
+    if expected_actions and not any(action.label in steps_text for action in expected_actions):
+        labels = "、".join(f"「{action.label}」" for action in expected_actions)
+        errors.append(f"下一步建议必须使用后端提供的按钮名称：{labels}")
+
+    if recommended_actions:
+        non_recommended_actions = [
+            action for action in enabled_actions if not action.recommended
+        ]
+        for action in non_recommended_actions:
+            if action.label in steps_text and contains_click_instruction(steps_text):
+                errors.append(f"已有更合适的推荐动作，不应同时建议点击「{action.label}」")
+
+    if not enabled_actions and any(action.label in steps_text for action in actions):
+        errors.append("当前没有可用按钮，不得建议用户点击流程按钮")
+
+    mentioned_actions = [action for action in actions if action.label in steps_text]
+    if (
+        any(keyword in steps_text for keyword in ("完成任务", "任务完成"))
+        and not any(action.to_status == TaskStatus.DONE for action in mentioned_actions)
+    ):
+        errors.append("当前动作不会完成整个任务，不得声称点击后任务完成")
+
+    if facts.current_gate is None and brief.pending_gate is not None:
+        errors.append("当前不存在人工门禁，pending_gate 必须为 null")
+    if facts.current_gate is not None:
+        if brief.pending_gate is None:
+            errors.append("当前存在人工门禁，必须在 pending_gate 中说明")
+        elif (
+            brief.pending_gate.type != facts.current_gate.type
+            or brief.pending_gate.owner != facts.current_gate.owner
+        ):
+            errors.append("pending_gate 必须与后端事实一致")
+    return errors
+
+
+def contains_click_instruction(text: str) -> bool:
+    return any(keyword in text for keyword in ("点击", "按下", "选择", "执行"))
+
+
+def build_validation_retry_instruction(errors: list[str]) -> str:
+    error_text = "\n".join(f"- {error}" for error in errors)
+    return f"""
+
+你上一次的输出未通过后端校验，请重新生成完整 JSON。
+必须修正：
+{error_text}
+"""
+
+
+def build_fallback_brief(
+    facts: GeminiTaskFacts,
+    model: str,
+) -> GeminiTaskBrief:
+    guidance = facts.workflow_guidance
+    enabled_actions = [action for action in guidance.available_user_actions if action.enabled]
+    recommended_actions = [action for action in enabled_actions if action.recommended]
+    selected_actions = recommended_actions or enabled_actions
+
+    if selected_actions:
+        suggested_next_steps = [action.instruction for action in selected_actions]
+    else:
+        blocked_reasons = [
+            action.blocked_reason
+            for action in guidance.available_user_actions
+            if action.blocked_reason
+        ]
+        suggested_next_steps = blocked_reasons or ["当前没有需要执行的下一步操作。"]
+
+    risk_notes = [
+        action.blocked_reason
+        for action in guidance.available_user_actions
+        if action.blocked_reason
+    ]
+    if facts.current_gate is not None:
+        risk_notes.append(facts.current_gate.reason)
+
+    return GeminiTaskBrief(
+        ok=True,
+        model=model,
+        facts_version=facts.facts_version,
+        summary=f"任务当前处于“{guidance.current_status_label}”状态。",
+        current_position=guidance.current_position,
+        pending_gate=facts.current_gate,
+        suggested_next_steps=list(dict.fromkeys(suggested_next_steps)),
+        risk_notes=list(dict.fromkeys(risk_notes)),
+    )
 
 
 def parse_gemini_brief_json(text: str) -> dict:

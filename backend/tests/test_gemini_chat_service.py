@@ -6,14 +6,15 @@ from app.schemas.gemini import (
     GeminiEventFact,
     GeminiGateFact,
     GeminiReviewSummary,
-    GeminiSafeNextAction,
     GeminiTaskFact,
     GeminiTaskFacts,
+    GeminiWorkflowGuidance,
 )
 from app.core.state_machine import TaskStatus
 from app.models.command import CommandStatus
 from app.models.task import TaskMode
 from app.models.worker import RunStatus
+from app.schemas.workflow import WorkflowActivity, WorkflowActivityState
 from app.services.gemini_chat_service import (
     build_home_chat_messages,
     build_native_payload,
@@ -53,7 +54,16 @@ def make_facts() -> GeminiTaskFacts:
             owner="Human Supervisor",
             reason="等待人工验收",
         ),
-        allowed_next_statuses=[TaskStatus.ACCEPTANCE_PASSED],
+        workflow_guidance=GeminiWorkflowGuidance(
+            current_stage_label="Accept",
+            current_status_label="待验收",
+            current_position="任务已经准备好进入人工验收。",
+            activity=WorkflowActivity(
+                state=WorkflowActivityState.WAITING_FOR_HUMAN_GATE,
+                message="当前流程正在等待 Human Supervisor 确认。",
+            ),
+            available_user_actions=[],
+        ),
         recent_events=[
             GeminiEventFact(
                 event_type="STATE_CHANGED",
@@ -93,14 +103,6 @@ def make_facts() -> GeminiTaskFacts:
                 exit_code=0,
                 duration_ms=100,
                 created_at="2026-06-21T00:00:00",
-            )
-        ],
-        safe_next_actions=[
-            GeminiSafeNextAction(
-                type="WAIT_HUMAN",
-                label="等待验收",
-                requires_human=True,
-                reason="Human Supervisor gate",
             )
         ],
     )

@@ -3,6 +3,7 @@ from sqlmodel import Session
 
 from app.core.database import get_session
 from app.schemas.task import TaskCreate, TaskDetail, TaskRead, TaskRequirementUpdate, TaskTransitionRequest
+from app.schemas.workflow import ResolvedWorkflowState
 from app.services.task_service import (
     create_task,
     get_task_events,
@@ -11,6 +12,7 @@ from app.services.task_service import (
     transition_task,
     update_task_requirement,
 )
+from app.services.workflow_action_service import resolve_task_workflow
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -30,6 +32,11 @@ def detail(task_id: int, session: Session = Depends(get_session)):
     task = get_task_or_404(session, task_id)
     events = get_task_events(session, task_id)
     return TaskDetail(task=task, events=events)
+
+
+@router.get("/{task_id}/workflow", response_model=ResolvedWorkflowState)
+def workflow(task_id: int, session: Session = Depends(get_session)):
+    return resolve_task_workflow(session, task_id)
 
 
 @router.post("/{task_id}/transition", response_model=TaskRead)

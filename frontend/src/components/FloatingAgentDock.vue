@@ -1017,6 +1017,7 @@ onBeforeUnmount(() => {
 .chat-window {
   min-height: 0;
   padding: 16px 14px;
+  overflow-x: hidden;
   overflow-y: auto;
 }
 
@@ -1028,6 +1029,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: flex-start;
   gap: 10px;
+  min-width: 0;
 }
 
 .message-row.is-user {
@@ -1054,6 +1056,8 @@ onBeforeUnmount(() => {
 
 .message-bubble {
   display: grid;
+  width: fit-content;
+  min-width: 0;
   max-width: min(326px, calc(100% - 48px));
   gap: 12px;
   padding: 12px 14px;
@@ -1081,6 +1085,8 @@ onBeforeUnmount(() => {
 .assistant-message-bubble p {
   margin: 0;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   color: #26364d;
   line-height: 1.65;
 }
@@ -1107,6 +1113,8 @@ onBeforeUnmount(() => {
 .user-message-bubble p {
   margin: 0;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   color: #15345f;
   line-height: 1.6;
 }
@@ -1114,10 +1122,13 @@ onBeforeUnmount(() => {
 .message-section {
   display: grid;
   gap: 5px;
+  min-width: 0;
 }
 
 .message-section p {
   margin: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   color: #26364d;
   line-height: 1.65;
 }
@@ -1125,10 +1136,17 @@ onBeforeUnmount(() => {
 .message-section ul {
   display: grid;
   gap: 7px;
+  min-width: 0;
   margin: 0;
   padding-left: 18px;
   color: #26364d;
   line-height: 1.55;
+}
+
+.message-section li {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .message-label {
@@ -1141,11 +1159,20 @@ onBeforeUnmount(() => {
 .gate-card {
   display: grid;
   gap: 4px;
+  min-width: 0;
   padding: 10px 12px;
   border: 1px solid rgba(245, 158, 11, 0.24);
   border-radius: 8px;
   background: rgba(255, 251, 235, 0.82);
   color: #3b2f12;
+}
+
+.gate-card strong,
+.gate-card span,
+.gate-card p {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .gate-card span {

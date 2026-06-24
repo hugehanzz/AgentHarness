@@ -3,7 +3,7 @@ import json
 
 from sqlmodel import Session, select
 
-from app.core.state_machine import ALLOWED_TRANSITIONS, HUMAN_GATE_STATUSES, TaskStatus
+from app.core.state_machine import HUMAN_GATE_STATUSES, TaskStatus
 from app.models.command import CommandRun
 from app.models.review import ReviewItem, ReviewItemStatus, ReviewSeverity
 from app.models.task import TaskEvent
@@ -14,42 +14,53 @@ from app.schemas.gemini import (
     GeminiEventFact,
     GeminiGateFact,
     GeminiReviewSummary,
-    GeminiSafeNextAction,
     GeminiTaskFact,
     GeminiTaskFacts,
+    GeminiWorkflowGuidance,
 )
+from app.schemas.workflow import ResolvedWorkflowState
 from app.services.task_service import get_task_or_404
+from app.services.workflow_action_service import resolve_task_workflow
 
 
 MAX_EXCERPT_LENGTH = 700
 
 GATE_FACTS: dict[TaskStatus, GeminiGateFact] = {
     TaskStatus.PLAN_READY: GeminiGateFact(
-        type="PLAN_APPROVAL",
+        type="计划确认",
         owner="Human Supervisor",
-        reason="Codex has prepared a plan. The Human Supervisor must confirm it before implementation.",
+        reason="Codex 已准备好实现计划，需要由 Human Supervisor 确认后才能开始开发。",
     ),
     TaskStatus.ACCEPTANCE_READY: GeminiGateFact(
-        type="ACCEPTANCE_APPROVAL",
+        type="最终验收",
         owner="Human Supervisor",
-        reason="The task is ready for acceptance. The Human Supervisor must make the final acceptance decision.",
+        reason="任务已完成开发和质量检查，需要由 Human Supervisor 做最终验收决定。",
     ),
 }
 
-NEXT_ACTION_LABELS: dict[TaskStatus, tuple[str, str]] = {
-    TaskStatus.PLAN_REQUESTED: ("REQUEST_CODEX_PLAN", "Ask Codex to prepare the implementation plan."),
-    TaskStatus.PLAN_CONFIRMED: ("START_CODEX_IMPLEMENTATION", "Ask Codex to implement the confirmed plan."),
-    TaskStatus.IMPLEMENT_DONE: ("REQUEST_REVIEW", "Ask Claude-DeepSeek to review the implementation."),
-    TaskStatus.FIX_REQUIRED: ("START_CODEX_FIX", "Ask Codex to fix open review items."),
-    TaskStatus.FIX_DONE: ("REQUEST_RECHECK", "Ask Claude-DeepSeek to recheck the fixes."),
-    TaskStatus.ACCEPTANCE_PASSED: ("START_ARCHIVE", "Ask Codex to update README archive documentation."),
-    TaskStatus.ARCHIVED: ("MARK_DONE", "Mark the task as done after archive completion."),
+STATUS_GUIDANCE: dict[TaskStatus, tuple[str, str, str]] = {
+    TaskStatus.REQUIREMENT_DRAFT: ("Requirement", "需求草稿", "需求已经创建，下一步需要请求 Codex 生成实现计划。"),
+    TaskStatus.PLAN_REQUESTED: ("Plan", "正在请求计划", "任务已进入计划阶段，下一步需要运行 Codex Plan。"),
+    TaskStatus.PLAN_READY: ("Plan", "计划待确认", "Codex 已产出计划，当前等待 Human Supervisor 确认。"),
+    TaskStatus.PLAN_CONFIRMED: ("Plan", "计划已确认", "计划已经确认，下一步可以让 Codex 开始实现。"),
+    TaskStatus.IMPLEMENTING: ("Build", "开发中", "Codex 正在或即将执行实现工作。"),
+    TaskStatus.IMPLEMENT_DONE: ("Build", "开发完成", "实现已经完成，下一步需要让 Claude 进行代码评审。"),
+    TaskStatus.REVIEW_REQUESTED: ("Review", "正在请求评审", "任务已进入评审阶段，下一步需要运行 Claude Review。"),
+    TaskStatus.REVIEW_DONE: ("Review", "评审完成", "Claude 已完成评审，当前需要决定是要求修复，还是进入验收。"),
+    TaskStatus.FIX_REQUIRED: ("Fix", "需要修复", "评审发现需要处理的问题，下一步应让 Codex 根据 REVIEW.md 修复。"),
+    TaskStatus.FIXING: ("Fix", "修复中", "Codex 正在或即将修复评审问题。"),
+    TaskStatus.FIX_DONE: ("Fix", "修复完成", "Codex 已完成修复，下一步需要让 Claude 复审。"),
+    TaskStatus.RECHECK_REQUESTED: ("Recheck", "正在请求复审", "任务已进入复审阶段，下一步需要运行 Claude Recheck。"),
+    TaskStatus.RECHECK_DONE: ("Recheck", "复审完成", "Claude 已完成复审，当前需要决定是继续修复，还是进入验收。"),
+    TaskStatus.ACCEPTANCE_READY: ("Accept", "待验收", "任务已经准备好进入人工验收。"),
+    TaskStatus.ACCEPTANCE_PASSED: ("Accept", "验收通过", "Human Supervisor 已确认验收通过，下一步需要让 Codex 处理 README 归档。"),
+    TaskStatus.ARCHIVED: ("Archive", "已归档", "Codex 已完成 README 归档检查，下一步可以标记任务完成。"),
+    TaskStatus.DONE: ("Done", "已完成", "任务已经结束，通常不需要继续操作。"),
 }
-
 
 def build_gemini_task_facts(session: Session, task_id: int) -> GeminiTaskFacts:
     task = get_task_or_404(session, task_id)
-    allowed_next_statuses = sorted(ALLOWED_TRANSITIONS.get(task.status, set()), key=lambda status: status.value)
+    workflow_state = resolve_task_workflow(session, task_id)
 
     events = session.exec(
         select(TaskEvent).where(TaskEvent.task_id == task_id).order_by(TaskEvent.created_at.desc()).limit(8)
@@ -75,7 +86,7 @@ def build_gemini_task_facts(session: Session, task_id: int) -> GeminiTaskFacts:
             mode=task.mode,
         ),
         "current_gate": get_current_gate(task.status),
-        "allowed_next_statuses": allowed_next_statuses,
+        "workflow_guidance": build_workflow_guidance(task.status, workflow_state),
         "recent_events": [
             GeminiEventFact(
                 event_type=event.event_type,
@@ -112,7 +123,6 @@ def build_gemini_task_facts(session: Session, task_id: int) -> GeminiTaskFacts:
             )
             for command in command_runs
         ],
-        "safe_next_actions": build_safe_next_actions(task.status, allowed_next_statuses),
     }
 
     return GeminiTaskFacts(
@@ -149,40 +159,18 @@ def get_current_gate(status: TaskStatus) -> GeminiGateFact | None:
     return GATE_FACTS.get(status)
 
 
-def build_safe_next_actions(
+def build_workflow_guidance(
     status: TaskStatus,
-    allowed_next_statuses: list[TaskStatus],
-) -> list[GeminiSafeNextAction]:
-    actions: list[GeminiSafeNextAction] = []
-    if status in GATE_FACTS:
-        gate = GATE_FACTS[status]
-        actions.append(
-            GeminiSafeNextAction(
-                type=gate.type,
-                label=f"Wait for {gate.owner}",
-                requires_human=True,
-                reason=gate.reason,
-            )
-        )
-        return actions
-
-    if len(allowed_next_statuses) != 1:
-        return actions
-
-    next_status = allowed_next_statuses[0]
-    action_type, reason = NEXT_ACTION_LABELS.get(
-        status,
-        (f"ADVANCE_TO_{next_status.value}", f"Current status can advance to {next_status.value}."),
+    workflow_state: ResolvedWorkflowState,
+) -> GeminiWorkflowGuidance:
+    stage_label, status_label, position = STATUS_GUIDANCE[status]
+    return GeminiWorkflowGuidance(
+        current_stage_label=stage_label,
+        current_status_label=status_label,
+        current_position=f"{position} {workflow_state.activity.message}",
+        activity=workflow_state.activity,
+        available_user_actions=workflow_state.actions,
     )
-    actions.append(
-        GeminiSafeNextAction(
-            type=action_type,
-            label=next_status.value,
-            requires_human=False,
-            reason=reason,
-        )
-    )
-    return actions
 
 
 def build_review_summary(items: list[ReviewItem]) -> GeminiReviewSummary:

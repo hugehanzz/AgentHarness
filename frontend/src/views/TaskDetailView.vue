@@ -10,7 +10,7 @@ import ReviewPanel from '../components/ReviewPanel.vue'
 import WorkerStatus from '../components/WorkerStatus.vue'
 import { api } from '../api/client'
 import { useTasksStore } from '../stores/tasks'
-import type { AgentRun, TaskStatus } from '../api/types'
+import type { AgentRun, TaskStatus, WorkflowAction } from '../api/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -19,7 +19,7 @@ const taskId = Number(route.params.id)
 const requirementEditing = ref(false)
 const requirementSaving = ref(false)
 const requirementDraft = ref('')
-const flowActionRunning = ref<TaskStatus | null>(null)
+const flowActionRunning = ref<string | null>(null)
 const currentAgentRunning = ref(false)
 const agentRunsRefreshKey = ref(0)
 const agentRuns = ref<AgentRun[]>([])
@@ -45,25 +45,6 @@ const statuses: TaskStatus[] = [
   'DONE',
 ]
 
-const nextStatusMap: Partial<Record<TaskStatus, TaskStatus[]>> = {
-  REQUIREMENT_DRAFT: ['PLAN_REQUESTED'],
-  PLAN_REQUESTED: ['PLAN_READY'],
-  PLAN_READY: ['PLAN_CONFIRMED'],
-  PLAN_CONFIRMED: ['IMPLEMENTING'],
-  IMPLEMENTING: ['IMPLEMENT_DONE'],
-  IMPLEMENT_DONE: ['REVIEW_REQUESTED'],
-  REVIEW_REQUESTED: ['REVIEW_DONE'],
-  REVIEW_DONE: ['FIX_REQUIRED', 'ACCEPTANCE_READY'],
-  FIX_REQUIRED: ['FIXING'],
-  FIXING: ['FIX_DONE'],
-  FIX_DONE: ['RECHECK_REQUESTED'],
-  RECHECK_REQUESTED: ['RECHECK_DONE'],
-  RECHECK_DONE: ['FIX_REQUIRED', 'ACCEPTANCE_READY'],
-  ACCEPTANCE_READY: ['ACCEPTANCE_PASSED'],
-  ACCEPTANCE_PASSED: ['ARCHIVED'],
-  ARCHIVED: ['DONE'],
-}
-
 const compactStages: Array<{ label: string; statuses: TaskStatus[] }> = [
   { label: 'Requirement', statuses: ['REQUIREMENT_DRAFT'] },
   { label: 'Plan', statuses: ['PLAN_REQUESTED', 'PLAN_READY', 'PLAN_CONFIRMED'] },
@@ -82,46 +63,11 @@ const activeStageIndex = computed(() => {
   return index >= 0 ? index : 0
 })
 
-const nextStatuses = computed(() => {
-  if (!store.selectedTask) return []
-  const statuses = nextStatusMap[store.selectedTask.status] || []
-  if (store.selectedTask.status === 'RECHECK_DONE') {
-    return ['ACCEPTANCE_READY', 'FIX_REQUIRED'] as TaskStatus[]
-  }
-  if (store.selectedTask.status === 'ACCEPTANCE_READY' && !hasSuccessfulAcceptanceChecklist.value) {
-    return []
-  }
-  return statuses
-})
+const workflowActions = computed(() => store.workflow?.actions || [])
 
 const requirementChanged = computed(() => {
   return requirementDraft.value.trim() !== (store.selectedTask?.description || '').trim()
 })
-
-const hasSuccessfulAcceptanceChecklist = computed(() =>
-  agentRuns.value.some(
-    (run) => run.run_type === 'codex_acceptance_checklist' && run.status === 'SUCCEEDED',
-  ),
-)
-
-const actionLabels: Partial<Record<TaskStatus, string>> = {
-  PLAN_REQUESTED: '请求计划',
-  PLAN_READY: '计划已准备',
-  PLAN_CONFIRMED: '确认计划',
-  IMPLEMENTING: '开始开发',
-  IMPLEMENT_DONE: '标记开发完成',
-  REVIEW_REQUESTED: '请求评审',
-  REVIEW_DONE: '标记评审完成',
-  FIX_REQUIRED: '要求修复',
-  FIXING: '开始修复',
-  FIX_DONE: '标记修复完成',
-  RECHECK_REQUESTED: '请求复审',
-  RECHECK_DONE: '标记复审完成',
-  ACCEPTANCE_READY: '进入验收',
-  ACCEPTANCE_PASSED: '标记验收通过',
-  ARCHIVED: 'Codex 归档',
-  DONE: '标记完成',
-}
 
 const statusLabels: Record<TaskStatus, string> = {
   REQUIREMENT_DRAFT: '需求草稿',
@@ -150,25 +96,6 @@ const eventTypeLabels: Record<string, string> = {
   AGENT_RUN_COMPLETED: 'Agent Run',
 }
 
-const agentRunByTransition: Partial<Record<TaskStatus, string>> = {
-  PLAN_REQUESTED: 'codex_plan',
-  IMPLEMENTING: 'codex_implement',
-  REVIEW_REQUESTED: 'claude_review',
-  FIXING: 'codex_fix',
-  RECHECK_REQUESTED: 'claude_recheck',
-  ARCHIVED: 'codex_archive',
-}
-
-const agentRunByCurrentStatus: Partial<Record<TaskStatus, string>> = {
-  PLAN_REQUESTED: 'codex_plan',
-  IMPLEMENTING: 'codex_implement',
-  REVIEW_REQUESTED: 'claude_review',
-  FIXING: 'codex_fix',
-  RECHECK_REQUESTED: 'claude_recheck',
-  ACCEPTANCE_READY: 'codex_acceptance_checklist',
-  ARCHIVED: 'codex_archive',
-}
-
 const agentRunLabels: Record<string, string> = {
   codex_plan: '运行 Codex Plan',
   codex_implement: '运行 Codex Implement',
@@ -190,13 +117,12 @@ const promptTypeByRunType: Record<string, string> = {
 }
 
 const currentAgentRunType = computed(() => {
-  if (!store.selectedTask) return null
-  return agentRunByCurrentStatus[store.selectedTask.status] || null
+  return store.workflow?.activity.agent_run_type || null
 })
 
 const currentAgentButtonIcon = computed(() => {
   if (currentAgentRunType.value === 'codex_acceptance_checklist') {
-    return hasSuccessfulAcceptanceChecklist.value ? Refresh : Right
+    return store.workflow?.activity.run_status === 'SUCCEEDED' ? Refresh : Right
   }
   return Refresh
 })
@@ -204,10 +130,6 @@ const currentAgentButtonIcon = computed(() => {
 const currentRunPromptType = computed(() => {
   return currentAgentRunType.value ? promptTypeByRunType[currentAgentRunType.value] || null : null
 })
-
-function actionLabel(status: TaskStatus) {
-  return actionLabels[status] || status
-}
 
 function statusLabel(status: TaskStatus | null) {
   return status ? statusLabels[status] || status : '-'
@@ -238,31 +160,20 @@ function stageState(stageIndex: number) {
   return ''
 }
 
-function flowButtonType(status: TaskStatus) {
-  if (store.selectedTask?.status === 'RECHECK_DONE' && status === 'FIX_REQUIRED') return 'default'
+function flowButtonType(action: WorkflowAction) {
+  if (action.action_id === 'request_fix_after_recheck') return 'default'
   return 'primary'
 }
 
-function flowButtonIcon(status: TaskStatus) {
-  if (store.selectedTask?.status === 'RECHECK_DONE' && status === 'FIX_REQUIRED') return Refresh
-  if (status === 'ACCEPTANCE_PASSED') return Check
+function flowButtonIcon(action: WorkflowAction) {
+  if (action.action_id === 'request_fix_after_recheck') return Refresh
+  if (action.to_status === 'ACCEPTANCE_PASSED') return Check
   return Right
 }
 
-function flowButtonDisabled(status: TaskStatus) {
+function flowButtonDisabled(action: WorkflowAction) {
   if (flowActionRunning.value) return true
-  return false
-}
-
-function flowButtonTooltip(status: TaskStatus) {
-  if (
-    store.selectedTask?.status === 'ACCEPTANCE_READY'
-    && status === 'ACCEPTANCE_PASSED'
-    && !hasSuccessfulAcceptanceChecklist.value
-  ) {
-    return '请先运行 Codex 验收建议'
-  }
-  return ''
+  return !action.enabled
 }
 
 async function loadTask() {
@@ -289,6 +200,7 @@ async function runAgentByType(runType: string, promptOverride?: string | null): 
     return data
   } finally {
     refreshAgentRuns()
+    await store.fetchWorkflow(taskId)
   }
 }
 
@@ -298,13 +210,6 @@ function promptOverrideForRunType(runType: string) {
   if (!agentPromptDraft.value.matchesCurrentRun) return null
   if (agentPromptDraft.value.promptType !== expectedPromptType) return null
   return agentPromptDraft.value.content
-}
-
-async function runAgentForTransition(toStatus: TaskStatus) {
-  const runType = agentRunByTransition[toStatus]
-  if (!runType) return
-
-  await runAgentByType(runType, promptOverrideForRunType(runType))
 }
 
 async function runCurrentAgent() {
@@ -327,26 +232,35 @@ function updateAgentRuns(runs: AgentRun[]) {
   agentRuns.value = runs
 }
 
-async function transition(toStatus: TaskStatus) {
+async function executeWorkflowAction(action: WorkflowAction) {
   refreshAgentRuns()
-  flowActionRunning.value = toStatus
+  flowActionRunning.value = action.action_id
   const previousStatus = store.selectedTask?.status
   try {
-    if (previousStatus === 'REVIEW_DONE' && toStatus === 'ACCEPTANCE_READY') {
-      const recheckRun = await runAgentByType('claude_recheck', promptOverrideForRunType('claude_recheck'))
-      if (recheckRun.status !== 'SUCCEEDED') {
-        throw new Error('Claude Recheck failed; REVIEW.md was not finalized')
+    if (action.agent_run_type && action.agent_run_timing === 'before_transition') {
+      const run = await runAgentByType(
+        action.agent_run_type,
+        promptOverrideForRunType(action.agent_run_type),
+      )
+      if (run.status !== 'SUCCEEDED') {
+        throw new Error(`${agentRunLabels[action.agent_run_type] || action.agent_run_type} failed`)
       }
     }
-    await store.transitionTask(taskId, toStatus, `Human Supervisor: ${actionLabel(toStatus)}`)
+    await store.transitionTask(taskId, action.to_status, `Human Supervisor: ${action.label}`)
     if (store.selectedTask?.status && store.selectedTask.status !== previousStatus) {
       refreshAgentRuns()
     }
-    await runAgentForTransition(toStatus)
+    if (action.agent_run_type && action.agent_run_timing === 'after_transition') {
+      await runAgentByType(
+        action.agent_run_type,
+        promptOverrideForRunType(action.agent_run_type),
+      )
+    }
   } catch (error: any) {
     ElMessage.error(error?.response?.data?.detail || error?.message || 'Flow action failed')
   } finally {
     flowActionRunning.value = null
+    await store.fetchWorkflow(taskId)
   }
 }
 
@@ -470,21 +384,21 @@ onMounted(() => {
 
         <div class="copy-row" style="margin-top: 16px;">
           <el-tooltip
-            v-for="status in nextStatuses"
-            :key="status"
-            :content="flowButtonTooltip(status)"
-            :disabled="!flowButtonTooltip(status)"
+            v-for="action in workflowActions"
+            :key="action.action_id"
+            :content="action.blocked_reason || action.instruction"
+            :disabled="!action.blocked_reason"
             placement="top"
           >
             <span>
               <el-button
-                :type="flowButtonType(status)"
-                :icon="flowButtonIcon(status)"
-                :loading="flowActionRunning === status"
-                :disabled="flowButtonDisabled(status)"
-                @click="transition(status)"
+                :type="flowButtonType(action)"
+                :icon="flowButtonIcon(action)"
+                :loading="flowActionRunning === action.action_id"
+                :disabled="flowButtonDisabled(action)"
+                @click="executeWorkflowAction(action)"
               >
-                {{ actionLabel(status) }}
+                {{ action.label }}
               </el-button>
             </span>
           </el-tooltip>

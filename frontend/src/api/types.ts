@@ -73,6 +73,52 @@ export interface AgentRun {
   created_at: string
 }
 
+export type WorkflowActivityState =
+  | 'WAITING_FOR_USER'
+  | 'WAITING_FOR_HUMAN_GATE'
+  | 'AGENT_RUNNING'
+  | 'AGENT_SUCCEEDED'
+  | 'AGENT_FAILED'
+  | 'COMPLETED'
+
+export interface WorkflowActivity {
+  state: WorkflowActivityState
+  message: string
+  agent_run_type: string | null
+  run_status: AgentRun['status'] | null
+  run_id: number | null
+}
+
+export interface WorkflowActionEvidence {
+  required_run_type: string
+  latest_run_status: AgentRun['status'] | null
+  latest_run_id: number | null
+  satisfied: boolean
+}
+
+export interface WorkflowAction {
+  action_id: string
+  label: string
+  from_status: TaskStatus
+  to_status: TaskStatus
+  enabled: boolean
+  recommended: boolean
+  requires_human_gate: boolean
+  agent_run_type: string | null
+  agent_run_timing: 'before_transition' | 'after_transition' | null
+  instruction: string
+  side_effects: string[]
+  blocked_reason: string | null
+  evidence: WorkflowActionEvidence | null
+}
+
+export interface WorkflowState {
+  task_id: number
+  current_status: TaskStatus
+  activity: WorkflowActivity
+  actions: WorkflowAction[]
+}
+
 export interface GeminiGateFact {
   type: string
   owner: string
