@@ -127,6 +127,7 @@ const geminiModelLabel = computed(() => brief.value?.model || fallbackGeminiMode
 const canSendChatDraft = computed(() => chatDraft.value.trim().length > 0 && !chatStreaming.value)
 const activeChatScope = computed(() => (currentTaskId.value ? `task:${currentTaskId.value}` : 'home'))
 const activeChatMessages = computed(() => chatMessagesByScope[activeChatScope.value] || [])
+const geminiWorking = computed(() => briefLoading.value || briefPrefetching.value || chatStreaming.value)
 
 const taskFactsTrigger = computed(() => {
   if (!currentTaskId.value) return ''
@@ -668,9 +669,16 @@ onBeforeUnmount(() => {
     <button
       v-for="agent in agents"
       :key="agent.key"
-      :class="['floating-agent-icon', { 'is-dragging': draggingClass === agent.key }]"
+      :class="[
+        'floating-agent-icon',
+        {
+          'is-dragging': draggingClass === agent.key,
+          'is-working': agent.key === 'gemini' && geminiWorking,
+        },
+      ]"
       :style="{ transform: `translate3d(${positions[agent.key].x}px, ${positions[agent.key].y}px, 0)` }"
       :title="agent.name"
+      :aria-busy="agent.key === 'gemini' ? geminiWorking : undefined"
       type="button"
       @pointermove="onPointerMove"
       @pointerdown="onPointerDown($event, agent.key)"
@@ -871,6 +879,97 @@ onBeforeUnmount(() => {
   cursor: grabbing;
   box-shadow: 0 16px 30px rgba(16, 24, 40, 0.18), 0 0 0 2px rgba(7, 133, 141, 0.08);
   transition: box-shadow 140ms ease, border-color 140ms ease;
+}
+
+.floating-agent-icon.is-working {
+  border-color: rgba(66, 133, 244, 0.58);
+  animation: gemini-working-float 2.4s ease-in-out infinite;
+}
+
+.floating-agent-icon.is-working::before,
+.floating-agent-icon.is-working::after {
+  position: absolute;
+  inset: -7px;
+  z-index: -1;
+  border-radius: inherit;
+  content: "";
+  pointer-events: none;
+}
+
+.floating-agent-icon.is-working::before {
+  background: radial-gradient(
+    circle,
+    rgba(122, 185, 255, 0.38) 0%,
+    rgba(66, 133, 244, 0.2) 48%,
+    rgba(66, 133, 244, 0) 74%
+  );
+  filter: blur(7px);
+  animation: gemini-working-glow 1.8s ease-in-out infinite;
+}
+
+.floating-agent-icon.is-working::after {
+  inset: -4px;
+  border: 1px solid rgba(116, 180, 255, 0.5);
+  animation: gemini-working-ring 1.8s ease-out infinite;
+}
+
+.floating-agent-icon.is-working:hover,
+.floating-agent-icon.is-working:focus-visible {
+  border-color: rgba(66, 133, 244, 0.72);
+  box-shadow:
+    0 16px 34px rgba(16, 24, 40, 0.2),
+    0 0 22px rgba(66, 133, 244, 0.34);
+}
+
+@keyframes gemini-working-glow {
+  0%,
+  100% {
+    opacity: 0.58;
+    transform: scale(0.94);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
+}
+
+@keyframes gemini-working-ring {
+  0% {
+    opacity: 0.7;
+    transform: scale(0.94);
+  }
+
+  75%,
+  100% {
+    opacity: 0;
+    transform: scale(1.28);
+  }
+}
+
+@keyframes gemini-working-float {
+  0%,
+  100% {
+    margin-top: 0;
+  }
+
+  50% {
+    margin-top: -3px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .floating-agent-icon.is-working,
+  .floating-agent-icon.is-working::before,
+  .floating-agent-icon.is-working::after {
+    animation: none;
+  }
+
+  .floating-agent-icon.is-working {
+    box-shadow:
+      0 14px 28px rgba(16, 24, 40, 0.16),
+      0 0 20px rgba(66, 133, 244, 0.38);
+  }
 }
 
 .agent-symbol {
