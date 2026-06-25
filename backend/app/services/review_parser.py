@@ -41,8 +41,7 @@ def parse_review_file(workspace_path: str, session: Session | None = None, task_
         raise HTTPException(status_code=404, detail="REVIEW.md not found")
 
     content = review_path.read_text(encoding="utf-8")
-    # Prefer the machine-readable JSON block when Claude writes one; fall back
-    # to markdown heuristics so older REVIEW.md files remain readable.
+    # 当 Claude 写入机器可读的 JSON 块时优先使用它；回退到 markdown 启发式方法以使旧的 REVIEW.md 文件保持可读。
     parsed = _parse_machine_state(content, str(review_path)) or _parse_markdown_state(content, str(review_path))
     _persist_items(parsed.items, session, task_id, str(review_path))
     return parsed
@@ -57,8 +56,7 @@ def _persist_items(
     if not session or task_id is None:
         return
 
-    # REVIEW.md is external and read-only to AgentHarness; we only mirror parsed
-    # items into our database for filtering, facts, and UI display.
+    # REVIEW.md 对 AgentHarness 是外部的且只读的；我们仅将解析的项目镜像到数据库中以供过滤、facts 和 UI 显示使用。
     session.exec(delete(ReviewItem).where(ReviewItem.task_id == task_id))
     for item in items:
         session.add(

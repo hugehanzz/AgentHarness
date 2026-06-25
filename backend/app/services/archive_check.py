@@ -23,8 +23,7 @@ def check_readme_archive(workspace_path: str) -> dict[str, bool | str | list[str
     if not readmes:
         raise HTTPException(status_code=404, detail="README.md not found")
 
-    # This is a lightweight heuristic gate, not a documentation linter. It
-    # catches missing archive signals before a task can be considered complete.
+    # 这是一个轻量级的启发式门禁，不是文档 linter。它捕捉缺失的归档信号，防止任务被视为完成。
     contents = "\n\n".join(readme.read_text(encoding="utf-8") for readme in readmes)
     lower_content = contents.lower()
     return {

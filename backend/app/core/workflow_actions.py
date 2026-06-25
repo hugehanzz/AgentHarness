@@ -24,9 +24,8 @@ class WorkflowActionDefinition:
             raise ValueError("agent_run_type and agent_run_timing must be configured together")
 
 
-# This catalog is the product-level description of every workflow button.
-# State-machine validation remains in state_machine.py; later consumers such as
-# the task UI and Gemini facts should read button semantics from this catalog.
+# 此目录是每个工作流按钮的产品级描述。
+# 状态机验证保留在 state_machine.py 中；后续消费者（如任务 UI 和 Gemini facts）应从该目录读取按钮语义。
 WORKFLOW_ACTIONS: tuple[WorkflowActionDefinition, ...] = (
     WorkflowActionDefinition(
         action_id="request_plan",

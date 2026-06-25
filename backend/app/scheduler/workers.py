@@ -29,8 +29,7 @@ WORKER_DEFINITIONS = [
 
 
 def ensure_workers(session: Session) -> None:
-    # The database is the source of truth after initial installation. Seed
-    # defaults only when the table is completely empty; never overwrite edits.
+    # 初始安装后，数据库是事实来源。仅在表完全为空时播种默认值；永远不要覆盖编辑。
     if session.exec(select(AgentWorker.id).limit(1)).first() is not None:
         return
     for worker_key, name, role, provider_type in WORKER_DEFINITIONS:
@@ -64,9 +63,8 @@ def command_is_available(command_value: str | None) -> bool:
 
 
 def heartbeat_workers(session: Session) -> None:
-    # Claude is an on-demand CLI, not a permanent daemon. Its idle heartbeat
-    # means the configured executable is locally available. Codex and Gemini
-    # will get provider-specific probes in their own implementations.
+    # Claude 是按需 CLI，不是永久守护进程。其空闲心跳意味着配置的可执行文件在本地可用。
+    # Codex 和 Gemini 将在其自己的实现中获得特定于提供者的探针。
     settings = get_settings()
     claude = session.exec(select(AgentWorker).where(AgentWorker.worker_key == "claude")).first()
     if claude and claude.status != WorkerStatus.RUNNING:

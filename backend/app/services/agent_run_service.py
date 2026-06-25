@@ -154,8 +154,7 @@ def get_latest_claude_task_session(session: Session, task_id: int) -> AgentSessi
 
 
 def get_or_create_claude_session(session: Session, task_id: int, workspace_path: str) -> AgentSession:
-    # Reuse a task's Claude session for review/recheck continuity, but rotate
-    # shared workspace sessions after several tasks to avoid context drift.
+    # 复用任务的 Claude 会话以保持 review/recheck 连续性，但在多个任务后轮换共享工作区会话以避免上下文漂移。
     task_session = get_latest_claude_task_session(session, task_id)
     if task_session:
         return task_session
@@ -250,8 +249,7 @@ async def run_codex_app_server_agent(
     prompt = resolve_prompt(task, CODEX_APP_SERVER_RUN_TYPES[run_type], prompt_override)
     existing_thread_id = get_latest_codex_thread_id(session, task.id)
     now = app_now()
-    # Persist the AgentRun before starting external work so failures and
-    # timeouts still leave an auditable execution record.
+    # 在启动外部工作之前持久化 AgentRun，以便失败和超时仍留下可审计的执行记录。
     record = AgentRun(
         task_id=task.id,
         worker_id=worker.id if worker else None,
@@ -375,8 +373,7 @@ async def run_local_agent(
     task_should_be_counted = should_count_task_for_session(session, claude_session.id, task.id)
     run_command = build_claude_cli_command(command, resume_session_id)
     now = app_now()
-    # Claude CLI is run as a bounded, non-interactive subprocess; stdout is
-    # parsed as JSON while stderr and model metadata are kept as diagnostics.
+    # Claude CLI 作为有界的非交互式子进程运行；stdout 被解析为 JSON，而 stderr 和模型元数据作为诊断信息保留。
     record = AgentRun(
         task_id=task.id,
         worker_id=worker.id if worker else None,
@@ -604,8 +601,7 @@ class CodexAppServerProcess:
             )
             await ws.send(json.dumps({"method": "initialized"}))
             if thread_id:
-                # Resume the existing Codex thread for task continuity; new
-                # tasks start fresh but later plan/build/fix/archive turns share context.
+                # 恢复现有的 Codex 线程以保持任务连续性；新任务从头开始，但后续的 plan/build/fix/archive 轮次共享上下文。
                 thread_response = await self.request(
                     ws,
                     "thread/resume",

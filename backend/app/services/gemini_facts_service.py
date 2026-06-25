@@ -60,9 +60,7 @@ def build_gemini_task_facts(session: Session, task_id: int) -> GeminiTaskFacts:
     task = snapshot.task
     workflow_state = resolve_task_workflow_snapshot(snapshot)
 
-    # Gemini receives a read-only fact package instead of direct database or
-    # workspace access. This keeps Secretary answers grounded without giving it
-    # authority to mutate task state or external project files.
+    # Gemini 接收只读的事实包，而不是直接的数据库或工作区访问。这让 Secretary 回答有据可依，同时不赋予它变更任务状态或外部项目文件的权限。
     payload = {
         "task": GeminiTaskFact(
             id=task.id,
@@ -119,8 +117,7 @@ def build_gemini_task_facts(session: Session, task_id: int) -> GeminiTaskFacts:
 
 
 def build_facts_version(payload: dict) -> str:
-    # The frontend uses this stable hash to decide whether a cached Gemini brief
-    # is still valid after task events, runs, reviews, or command results change.
+    # 前端使用此稳定哈希来决定缓存的 Gemini brief 在任务事件、runs、reviews 或命令结果更改后是否仍然有效。
     stable_json = json.dumps(
         normalize_for_hash(payload),
         ensure_ascii=False,

@@ -31,8 +31,7 @@ export const useTasksStore = defineStore('tasks', {
       this.tasks = data
     },
     async fetchTask(id: number) {
-      // Clear stale detail state before loading a new task so panels do not
-      // briefly render the previous task under the new route.
+      // 在加载新任务之前清除过时的详情状态，以便面板不会短暂地在新路由下渲染之前的任务。
       this.detailLoading = true
       this.detailError = null
       this.selectedTask = null
@@ -63,8 +62,7 @@ export const useTasksStore = defineStore('tasks', {
     },
     async transitionTask(id: number, toStatus: TaskStatus, message?: string) {
       await api.post(`/tasks/${id}/transition`, { to_status: toStatus, message })
-      // Refresh both detail and list views because a transition changes the
-      // current task row, board counters, pagination ordering, and events.
+      // 刷新详情和列表视图，因为状态转换会改变当前任务行、看板计数器、分页顺序和事件。
       await this.fetchTask(id)
       await this.fetchTasks()
     },

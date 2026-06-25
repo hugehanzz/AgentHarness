@@ -14,15 +14,14 @@ from app.scheduler.workers import ensure_workers
 
 
 if sys.platform == "win32":
-    # asyncio subprocess support on Windows requires a Proactor event loop.
-    # Safe commands and local CLI agents depend on it.
+    # Windows 上的 asyncio subprocess 支持需要 Proactor 事件循环。
+    # 安全命令和本地 CLI agent 依赖于此。
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Initialize control-plane tables/workers and keep lightweight heartbeats
-    # running for the frontend worker-status panel.
+    # 初始化控制面表/worker，并保持轻量级心跳运行以供前端 worker 状态面板使用。
     init_db()
     with Session(engine) as session:
         ensure_workers(session)
