@@ -7,6 +7,13 @@ import httpx
 
 from app.core.config import get_settings
 from app.schemas.gemini import GeminiTextResponse
+from app.services.gemini_worker_service import (
+    begin_gemini_request,
+    finish_gemini_request,
+    maintain_gemini_heartbeat,
+    mark_gemini_offline,
+    stop_gemini_heartbeat,
+)
 
 
 def build_gemini_native_model_url(base_url: str, model: str, action: str) -> str:
@@ -56,12 +63,17 @@ def extract_native_text(payload: dict[str, Any]) -> tuple[str, str | None]:
 async def generate_gemini_text(prompt: str) -> GeminiTextResponse:
     settings = get_settings()
     if not settings.gemini_api_key:
+        mark_gemini_offline()
         raise HTTPException(status_code=400, detail="GEMINI_API_KEY is not configured")
     base_url = resolve_gemini_base_url(
         settings.gemini_base_url,
         settings.google_gemini_base_url,
     )
 
+    begin_gemini_request()
+    heartbeat_stop = asyncio.Event()
+    heartbeat_task = asyncio.create_task(maintain_gemini_heartbeat(heartbeat_stop))
+    success = False
     try:
         async with httpx.AsyncClient(proxy=settings.gemini_proxy_url, timeout=settings.gemini_timeout_seconds) as client:
             response = await client.post(
@@ -77,17 +89,20 @@ async def generate_gemini_text(prompt: str) -> GeminiTextResponse:
                 status_code=502,
                 detail=f"Gemini native API returned {response.status_code}: {response.text}",
             )
+        text, finish_reason = extract_native_text(response.json())
+        success = True
+        return GeminiTextResponse(
+            ok=True,
+            model=settings.gemini_model,
+            text=text,
+            finish_reason=finish_reason,
+        )
     except TimeoutError as exc:
         raise HTTPException(status_code=502, detail="Gemini native request timed out") from exc
     except httpx.TimeoutException as exc:
         raise HTTPException(status_code=502, detail=f"Gemini native API timed out: {exc}") from exc
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"Gemini native API request failed: {exc}") from exc
-
-    text, finish_reason = extract_native_text(response.json())
-    return GeminiTextResponse(
-        ok=True,
-        model=settings.gemini_model,
-        text=text,
-        finish_reason=finish_reason,
-    )
+    finally:
+        await stop_gemini_heartbeat(heartbeat_stop, heartbeat_task)
+        finish_gemini_request(success=success)

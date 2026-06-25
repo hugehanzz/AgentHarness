@@ -1,11 +1,8 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted } from 'vue'
 import { Cpu, Refresh, User, View } from '@element-plus/icons-vue'
 import { useTasksStore } from '../stores/tasks'
 
 const store = useTasksStore()
-const pollIntervalMs = 5000
-let pollTimer: ReturnType<typeof window.setInterval> | null = null
 
 function statusClass(status: string) {
   return status.toLowerCase()
@@ -15,14 +12,6 @@ function heartbeatTitle(value: string | null) {
   return value ? `Last heartbeat: ${value.replace('T', ' ')}` : 'No heartbeat'
 }
 
-onMounted(() => {
-  store.fetchWorkers()
-  pollTimer = window.setInterval(() => store.fetchWorkers(), pollIntervalMs)
-})
-
-onBeforeUnmount(() => {
-  if (pollTimer) window.clearInterval(pollTimer)
-})
 </script>
 
 <template>

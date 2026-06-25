@@ -10,6 +10,13 @@ from app.core.config import get_settings
 from app.schemas.gemini import GeminiChatRequest, GeminiTaskFacts
 from app.services.gemini_context_service import build_gemini_task_context
 from app.services.gemini_service import resolve_gemini_base_url
+from app.services.gemini_worker_service import (
+    begin_gemini_request,
+    finish_gemini_request,
+    maintain_gemini_heartbeat,
+    mark_gemini_offline,
+    stop_gemini_heartbeat,
+)
 
 DELTA_CHUNK_SIZE = 8
 DELTA_CHUNK_DELAY_SECONDS = 0.025
@@ -150,9 +157,14 @@ def parse_native_sse_line(line: str) -> dict[str, Any] | None:
 async def stream_gemini_chat(messages: list[dict[str, str]], facts_version: str | None = None):
     settings = get_settings()
     if not settings.gemini_api_key:
+        mark_gemini_offline()
         yield sse_event("error", {"detail": "GEMINI_API_KEY is not configured"})
         return
 
+    begin_gemini_request()
+    heartbeat_stop = asyncio.Event()
+    heartbeat_task = asyncio.create_task(maintain_gemini_heartbeat(heartbeat_stop))
+    success = False
     try:
         base_url = resolve_gemini_base_url(
             settings.gemini_base_url,
@@ -186,6 +198,7 @@ async def stream_gemini_chat(messages: list[dict[str, str]], facts_version: str 
                         async for event in stream_text_delta(text):
                             yield event
 
+        success = True
         yield sse_event("done", {"model": settings.gemini_model, "facts_version": facts_version})
     except TimeoutError:
         yield sse_event("error", {"detail": "Gemini native streaming request timed out"})
@@ -197,3 +210,6 @@ async def stream_gemini_chat(messages: list[dict[str, str]], facts_version: str 
         yield sse_event("error", {"detail": f"Gemini native API request failed: {exc}"})
     except json.JSONDecodeError as exc:
         yield sse_event("error", {"detail": f"Gemini native API returned invalid SSE JSON: {exc}"})
+    finally:
+        await stop_gemini_heartbeat(heartbeat_stop, heartbeat_task)
+        finish_gemini_request(success=success)

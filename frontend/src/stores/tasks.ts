@@ -2,6 +2,9 @@ import { defineStore } from 'pinia'
 import { api } from '../api/client'
 import type { Task, TaskEvent, TaskStatus, Worker, WorkflowState } from '../api/types'
 
+const workerPollIntervalMs = 5000
+let workerPollTimer: ReturnType<typeof window.setInterval> | null = null
+
 interface State {
   tasks: Task[]
   selectedTask: Task | null
@@ -73,6 +76,18 @@ export const useTasksStore = defineStore('tasks', {
     async fetchWorkers() {
       const { data } = await api.get<Worker[]>('/workers')
       this.workers = data
+    },
+    startWorkerPolling() {
+      if (workerPollTimer) return
+      void this.fetchWorkers().catch(() => undefined)
+      workerPollTimer = window.setInterval(() => {
+        void this.fetchWorkers().catch(() => undefined)
+      }, workerPollIntervalMs)
+    },
+    stopWorkerPolling() {
+      if (!workerPollTimer) return
+      window.clearInterval(workerPollTimer)
+      workerPollTimer = null
     },
   },
 })

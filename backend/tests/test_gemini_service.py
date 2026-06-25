@@ -44,6 +44,8 @@ def test_resolve_gemini_base_url_allows_legacy_google_base_url_override():
 
 
 def test_generate_gemini_text_requires_api_key(monkeypatch):
+    marked_offline = []
+    monkeypatch.setattr(gemini_service, "mark_gemini_offline", lambda: marked_offline.append(True))
     monkeypatch.setattr(
         gemini_service,
         "get_settings",
@@ -64,6 +66,7 @@ def test_generate_gemini_text_requires_api_key(monkeypatch):
 
     assert exc_info.value.status_code == 400
     assert "GEMINI_API_KEY" in exc_info.value.detail
+    assert marked_offline == [True]
 
 
 def test_extract_native_text_reads_candidate_parts():

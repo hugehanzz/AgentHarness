@@ -20,4 +20,8 @@ npm run build
 
 The Workers panel polls `/api/workers` every five seconds and renders the
 database-backed `ONLINE`, `RUNNING`, `FAILED`, or `OFFLINE` state. A running
-Claude worker also activates the Claude floating icon glow.
+Claude worker also activates the Claude floating icon glow. Worker polling is
+owned by the top-level app and stored in Pinia, so both Claude and Gemini
+floating icons receive status updates even when the Workers panel is not
+mounted. Gemini keeps its immediate local request glow and also responds to the
+backend `RUNNING` state.

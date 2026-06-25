@@ -9,6 +9,7 @@ from sqlmodel import Session, select
 from app.core.config import get_settings
 from app.models.common import app_now
 from app.models.worker import AgentWorker, WorkerStatus
+from app.services.gemini_worker_service import is_gemini_active
 
 
 class WorkerAgent(ABC):
@@ -66,14 +67,25 @@ def heartbeat_workers(session: Session) -> None:
     # Claude is an on-demand CLI, not a permanent daemon. Its idle heartbeat
     # means the configured executable is locally available. Codex and Gemini
     # will get provider-specific probes in their own implementations.
-    worker = session.exec(select(AgentWorker).where(AgentWorker.worker_key == "claude")).first()
-    if not worker or worker.status == WorkerStatus.RUNNING:
-        return
-    available = command_is_available(get_settings().agent_claude_command)
-    worker.last_heartbeat_at = app_now() if available else None
-    if available and worker.status == WorkerStatus.OFFLINE:
-        worker.status = WorkerStatus.ONLINE
-    elif not available:
-        worker.status = WorkerStatus.OFFLINE
-    session.add(worker)
+    settings = get_settings()
+    claude = session.exec(select(AgentWorker).where(AgentWorker.worker_key == "claude")).first()
+    if claude and claude.status != WorkerStatus.RUNNING:
+        available = command_is_available(settings.agent_claude_command)
+        claude.last_heartbeat_at = app_now() if available else None
+        if available and claude.status == WorkerStatus.OFFLINE:
+            claude.status = WorkerStatus.ONLINE
+        elif not available:
+            claude.status = WorkerStatus.OFFLINE
+        session.add(claude)
+
+    gemini = session.exec(select(AgentWorker).where(AgentWorker.worker_key == "gemini")).first()
+    if gemini and not is_gemini_active():
+        if getattr(settings, "gemini_api_key", None):
+            gemini.last_heartbeat_at = app_now()
+            if gemini.status in {WorkerStatus.OFFLINE, WorkerStatus.RUNNING}:
+                gemini.status = WorkerStatus.ONLINE
+        else:
+            gemini.status = WorkerStatus.OFFLINE
+            gemini.last_heartbeat_at = None
+        session.add(gemini)
     session.commit()

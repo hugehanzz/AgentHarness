@@ -127,7 +127,13 @@ const geminiModelLabel = computed(() => brief.value?.model || fallbackGeminiMode
 const canSendChatDraft = computed(() => chatDraft.value.trim().length > 0 && !chatStreaming.value)
 const activeChatScope = computed(() => (currentTaskId.value ? `task:${currentTaskId.value}` : 'home'))
 const activeChatMessages = computed(() => chatMessagesByScope[activeChatScope.value] || [])
-const geminiWorking = computed(() => briefLoading.value || briefPrefetching.value || chatStreaming.value)
+const geminiWorking = computed(() => {
+  const localWorking = briefLoading.value || briefPrefetching.value || chatStreaming.value
+  const backendWorking = store.workers.find(
+    (worker) => worker.worker_key === 'gemini',
+  )?.status === 'RUNNING'
+  return localWorking || backendWorking
+})
 const claudeWorking = computed(() => {
   return store.workers.find((worker) => worker.worker_key === 'claude')?.status === 'RUNNING'
 })

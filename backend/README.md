@@ -61,8 +61,17 @@ Claude is currently the first provider with a complete worker lifecycle:
 - `RUNNING`: a review or recheck subprocess is active; heartbeat is refreshed.
 - `FAILED`: the latest Claude run failed or timed out.
 
-Codex and Gemini remain `OFFLINE` until their provider-specific status probes
-are implemented.
+Gemini uses the same state vocabulary for API calls:
+
+- API key missing: `OFFLINE`.
+- API key configured and idle: `ONLINE`.
+- Brief generation or chat streaming active: `RUNNING`, with a refreshed
+  heartbeat until the request or stream ends.
+- API error or timeout: `FAILED`.
+
+Concurrent Gemini requests are counted in the backend process, so the worker
+stays `RUNNING` until the last active request finishes. Codex remains `OFFLINE`
+until its provider-specific status probe is implemented.
 
 ## Test
 
