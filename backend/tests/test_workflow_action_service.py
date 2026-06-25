@@ -176,7 +176,7 @@ def test_resolver_ignores_agent_runs_created_before_current_status():
         session.commit()
         transition_event = task.updated_at
 
-        # Record entry into the current status after the stale successful run.
+        # 在陈旧的成功 run 之后记录进入当前状态。
         from app.models.task import TaskEvent
 
         session.add(

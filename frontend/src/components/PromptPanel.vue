@@ -109,7 +109,7 @@ function savePromptEdit() {
 watch(
   () => props.currentStatus,
   () => {
-    // Keep the prompt panel aligned with the next natural workflow action.
+    // 保持 prompt 面板与下一个自然工作流动作对齐。
     selectedType.value = recommendedType.value
   },
   { immediate: true },

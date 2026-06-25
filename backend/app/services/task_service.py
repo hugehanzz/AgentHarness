@@ -41,8 +41,7 @@ def get_task_events(session: Session, task_id: int) -> list[TaskEvent]:
 
 
 def has_successful_acceptance_checklist(session: Session, task_id: int) -> bool:
-    # Acceptance is a human decision, but it must be preceded by Codex producing
-    # an explicit checklist/evidence package for the supervisor to inspect.
+    # 验收是人类决策，但必须先由 Codex 生成明确的清单/证据包供主管检查。
     run = session.exec(
         select(AgentRun)
         .where(
@@ -79,7 +78,7 @@ def transition_task(session: Session, task_id: int, to_status: TaskStatus, messa
         and not has_successful_claude_recheck(session, task.id)
     ):
         raise HTTPException(status_code=400, detail="Claude recheck must finalize REVIEW.md before acceptance")
-    # Guard the final acceptance gate with evidence, not just a button click.
+    # 用证据保护最终验收入口，而不仅仅是点击按钮。
     if (
         from_status == TaskStatus.ACCEPTANCE_READY
         and to_status == TaskStatus.ACCEPTANCE_PASSED

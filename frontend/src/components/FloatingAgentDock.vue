@@ -236,8 +236,8 @@ function pushAway(sourceKey: AgentKey, targetKey: AgentKey) {
 }
 
 function resolvePushAway(activeKey: AgentKey) {
-  // Keep the three agent icons independently draggable while preventing overlap.
-  // The dragged icon is authoritative; nearby icons are gently pushed away.
+  // 保持三个 agent 图标可独立拖动，同时防止重叠。
+  // 被拖动的图标具有权威性；附近的图标会被轻轻推开。
   for (let pass = 0; pass < agents.length; pass += 1) {
     agents.forEach((sourceAgent) => {
       agents.forEach((targetAgent) => {
@@ -350,8 +350,7 @@ async function prefetchGeminiBrief() {
   if (!currentTaskId.value || briefPrefetching.value) return
   if (!store.selectedTask || !geminiBriefPrefetchStatuses.has(store.selectedTask.status)) return
 
-  // Brief generation is slow enough to feel blank on click, so key workflow
-  // states warm the cache in the background and rely on facts_version to expire.
+  // Brief 生成速度较慢，点击时会感觉空白，因此关键工作流状态会在后台预热缓存，并依赖 facts_version 来过期。
   briefPrefetching.value = true
   try {
     const taskId = currentTaskId.value
@@ -365,7 +364,7 @@ async function prefetchGeminiBrief() {
     }
     await fetchGeminiBrief(taskId, facts.facts_version)
   } catch {
-    // Background prefetch is best effort; explicit open/refresh will surface errors.
+    // 后台预取是尽力而为的；显式打开/刷新会显示错误。
   } finally {
     briefPrefetching.value = false
   }
@@ -435,8 +434,8 @@ function updateChatMessage(scope: string, id: number, updater: (message: ChatMes
   if (!messages) return
   const index = messages.findIndex((message) => message.id === id)
   if (index < 0) return
-  // Replace the array item instead of mutating a captured object reference.
-  // This makes every streamed Gemini delta reliably trigger Vue rendering.
+  // 替换数组项而不是改变捕获的对象引用。
+  // 这让每个流式 Gemini delta 都能可靠地触发 Vue 渲染。
   messages[index] = updater(messages[index])
 }
 
@@ -505,8 +504,7 @@ function parseSseBlock(block: string): SsePayload | null {
 }
 
 function collectSseEvents(buffer: string): { events: SsePayload[]; remaining: string } {
-  // A network read can contain partial, one, or many SSE frames. Keep the
-  // unfinished tail in the buffer and emit only complete "\n\n" blocks.
+  // 网络读取可能包含部分、一个或多个 SSE 帧。将未完成的尾部保留在缓冲区中，仅发出完整的 "\n\n" 块。
   const normalized = buffer.replace(/\r\n/g, '\n')
   const blocks = normalized.split('\n\n')
   const remaining = blocks.pop() || ''
@@ -536,8 +534,7 @@ async function streamGeminiReply(text: string, assistantMessageId: number, histo
   const decoder = new TextDecoder()
   let buffer = ''
 
-  // Read the browser stream directly instead of using axios; axios does not
-  // expose incremental response body reads in the browser.
+  // 直接读取浏览器流而不是使用 axios；axios 在浏览器中不暴露增量响应体读取。
   while (true) {
     const { value, done } = await reader.read()
     if (done) break

@@ -72,8 +72,7 @@ function stopPolling() {
 function startPolling() {
   if (pollTimer) return
   pollStartedAt = Date.now()
-  // Runs are executed by external processes; polling keeps the UI fresh without
-  // requiring a websocket channel for every AgentRun.
+  // Run 由外部进程执行；轮询使 UI 保持最新，无需为每个 AgentRun 使用 websocket 通道。
   pollTimer = window.setInterval(() => {
     if (Date.now() - pollStartedAt >= maxPollingMs) {
       stopPolling()
@@ -97,8 +96,7 @@ watch(
 watch(
   () => latestRun.value?.id,
   () => {
-    // Collapse old diagnostics/details when a new run arrives so evidence from
-    // the previous run is not visually mixed with the latest execution.
+    // 当新 run 到达时折叠旧的 diagnostics/details，以便前一个 run 的证据不会与最新执行混合。
     openDiagnostics.value = []
     openRunDetails.value = []
   },

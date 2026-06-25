@@ -11,7 +11,7 @@ AgentHarness 是一个本地运行、由 Human Supervisor 监督的多 Agent 研
 - 测试数据库：后端测试使用 SQLite，不依赖 MySQL。
 - 运行数据库：MySQL。
 - 本地 Agent 接入：Codex App Server、Claude CLI。
-- 系统内部 AI：Gemini Secretary，通过后端调用 Gemini 原生 API。
+- 系统内部 AI：Gemini，通过后端调用 Gemini 原生 API。
 
 当前真正作为 AgentWorker 登记的只有三个：
 
@@ -135,6 +135,44 @@ GEMINI_PROXY_URL=http://127.0.0.1:7890
 - 不能直接触发 worker run 或修改任务状态。
 - 不能直接修改外部业务项目代码。
 
+## Worker 状态与心跳
+
+三个 Agent 使用统一的 Worker 状态：
+
+- `ONLINE`：provider 已配置且当前空闲。
+- `RUNNING`：当前存在活动任务或 API 请求。
+- `FAILED`：最近一次运行、连接或 API 调用失败。
+- `OFFLINE`：provider 未配置、对应命令不存在或无法启动。
+
+后端启动后每 10 秒执行一次轻量级 Worker 检查。该检查不会主动调用 Gemini API，也不会为 Codex 或 Claude 创建任务。
+
+### Codex 心跳
+
+- 空闲时检查 `CODEX_APP_SERVER_COMMAND` 中的可执行文件是否存在；存在时显示 `ONLINE`，不存在时显示 `OFFLINE`。
+- Codex AgentRun 启动后立即切换为 `RUNNING`。
+- App Server 启动、WebSocket 连接和整个 Codex Turn 期间，每 10 秒刷新一次 `last_heartbeat_at`。
+- Turn 成功后恢复 `ONLINE`；超时、未完成、WebSocket 异常或清理失败时变为 `FAILED`；进程无法启动时变为 `OFFLINE`。
+- 多个 Codex run 并发时，最后一个活动 run 结束后才退出 `RUNNING`。
+- 后端启动后发现数据库残留的 `RUNNING` 且心跳超过 30 秒时，将其恢复为 `FAILED`。
+- Codex 继续使用现有稳定的 App Server 启动、WebSocket 通信和端口清理方式，心跳改造没有替换其进程执行链路。
+
+### Claude 心跳
+
+- 空闲时检查 `AGENT_CLAUDE_COMMAND` 中的可执行文件是否存在；存在时显示 `ONLINE`，不存在时显示 `OFFLINE`。
+- Review 或 Recheck 启动后切换为 `RUNNING`。
+- Claude CLI 子进程运行期间，每 10 秒刷新一次 `last_heartbeat_at`。
+- 执行成功后恢复 `ONLINE`；失败或超时后变为 `FAILED`；CLI 无法启动时变为 `OFFLINE`。
+
+### Gemini 心跳
+
+- 只检查是否配置 `GEMINI_API_KEY`，不会通过额外探测请求消耗 API 配额。
+- API Key 已配置且当前空闲时显示 `ONLINE`；未配置时显示 `OFFLINE`。
+- `/gemini/test`、任务 brief、首页聊天和任务聊天调用期间显示 `RUNNING`。
+- SSE 流式聊天在流真正结束前持续刷新心跳并保持 `RUNNING`。
+- 调用成功后恢复 `ONLINE`；API 错误、网络错误或超时后变为 `FAILED`。
+- 并发 Gemini 请求使用进程内活动计数，最后一个请求结束后才退出 `RUNNING`。
+- `/gemini/tasks/{task_id}/facts` 和 diagnostic stream 不调用 Gemini API，因此不改变 Worker 状态。
+
 ## 工作流
 
 前端显示 9 个阶段：
@@ -189,7 +227,7 @@ DONE
 - 可编辑的 Requirement 面板。
 - Agent Prompt 面板：实时预览提示词、选择模板、点击 Edit 后可手动编辑。
 - Agent Runs 面板：展示执行历史、输出、诊断信息和运行证据。
-- Workers 面板：展示当前 worker 状态。
+- Workers 面板：展示数据库中的 `ONLINE`、`RUNNING`、`FAILED`、`OFFLINE` 状态和最近心跳，并通过 Pinia 与浮动 Agent 图标联动。
 - Review Results 面板：读取并解析外部业务项目的 `REVIEW.md`。
 - Safe Commands 面板：运行已注册安全命令。
 - Events 面板：展示流程事件，面板内部滚动，避免把 Agent Runs 挤下去。
@@ -247,13 +285,13 @@ Agent Runs 刷新规则：
 - `/workers`：查看 worker 状态。
 - `/archive`：检查 README 归档覆盖情况。
 
-后端启动时只会创建或更新三个 worker：
+首次安装且 `agentworker` 表完全为空时，后端会 seed 三个 worker：
 
 - Codex
 - Claude
 - Gemini
 
-如果旧数据库里还有早期实验留下的 worker 行，需要人工按需清理。
+后续启动不会覆盖数据库中的 Worker 名称、角色或 provider 类型。Agent provider 通过稳定的 `worker_key` 查找对应记录。
 
 ## Prompt 规则
 
@@ -370,4 +408,3 @@ npm run build
 - Claude CLI 通过工具白名单禁用 Bash，但以当前 Windows 用户身份运行，并非操作系统级只读沙箱；当前主要依靠工具限制和提示词约束其写入范围。
 - Human Supervisor 门禁保持人工决策。
 - Safe Commands 只允许白名单命令。
-- 旧数据库可能仍有历史 worker 行或空遗留表，需要人工清理。
