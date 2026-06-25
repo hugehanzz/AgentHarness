@@ -9,6 +9,7 @@ from sqlmodel import Session, select
 from app.core.config import get_settings
 from app.models.common import app_now
 from app.models.worker import AgentWorker, WorkerStatus
+from app.services.codex_worker_service import is_codex_active
 from app.services.gemini_worker_service import is_gemini_active
 
 
@@ -66,9 +67,31 @@ def heartbeat_workers(session: Session) -> None:
     # Claude 是按需 CLI，不是永久守护进程。其空闲心跳意味着配置的可执行文件在本地可用。
     # Codex 和 Gemini 将在其自己的实现中获得特定于提供者的探针。
     settings = get_settings()
+    codex = session.exec(select(AgentWorker).where(AgentWorker.worker_key == "codex")).first()
+    if codex and not is_codex_active():
+        available = command_is_available(getattr(settings, "codex_app_server_command", None))
+        if not available:
+            codex.status = WorkerStatus.OFFLINE
+            codex.last_heartbeat_at = None
+        elif codex.status == WorkerStatus.RUNNING:
+            heartbeat_at = codex.last_heartbeat_at
+            heartbeat_age = (
+                (app_now() - heartbeat_at).total_seconds()
+                if heartbeat_at
+                else float("inf")
+            )
+            if heartbeat_age >= 30:
+                codex.status = WorkerStatus.FAILED
+        elif codex.status == WorkerStatus.OFFLINE:
+            codex.status = WorkerStatus.ONLINE
+            codex.last_heartbeat_at = app_now()
+        elif codex.status == WorkerStatus.ONLINE:
+            codex.last_heartbeat_at = app_now()
+        session.add(codex)
+
     claude = session.exec(select(AgentWorker).where(AgentWorker.worker_key == "claude")).first()
     if claude and claude.status != WorkerStatus.RUNNING:
-        available = command_is_available(settings.agent_claude_command)
+        available = command_is_available(getattr(settings, "agent_claude_command", None))
         claude.last_heartbeat_at = app_now() if available else None
         if available and claude.status == WorkerStatus.OFFLINE:
             claude.status = WorkerStatus.ONLINE

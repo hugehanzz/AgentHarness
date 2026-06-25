@@ -303,6 +303,9 @@ def test_codex_run_uses_app_server_adapter(monkeypatch, tmp_path):
         assert FakeCodexAppServerProcess.command == ["codex", "app-server"]
         assert FakeCodexAppServerProcess.cwd == str(tmp_path.resolve())
         assert FakeCodexAppServerProcess.stopped is True
+        codex = session.exec(select(AgentWorker).where(AgentWorker.worker_key == "codex")).one()
+        assert codex.status == WorkerStatus.ONLINE
+        assert codex.last_heartbeat_at is not None
 
 
 def test_codex_run_reuses_latest_thread(monkeypatch, tmp_path):

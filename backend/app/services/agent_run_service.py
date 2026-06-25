@@ -26,6 +26,12 @@ from app.models.worker import (
 )
 from app.prompts.templates import build_prompt
 from app.services.archive_check import check_readme_archive
+from app.services.codex_worker_service import (
+    begin_codex_run,
+    finish_codex_run,
+    maintain_codex_heartbeat,
+    stop_codex_heartbeat,
+)
 from app.services.task_service import get_task_or_404
 
 
@@ -246,6 +252,8 @@ async def run_codex_app_server_agent(
         raise HTTPException(status_code=400, detail="CODEX_APP_SERVER_COMMAND is empty")
 
     worker = session.exec(select(AgentWorker).where(AgentWorker.worker_key == "codex")).first()
+    if not worker:
+        raise HTTPException(status_code=503, detail="Codex worker is not registered")
     prompt = resolve_prompt(task, CODEX_APP_SERVER_RUN_TYPES[run_type], prompt_override)
     existing_thread_id = get_latest_codex_thread_id(session, task.id)
     now = app_now()
@@ -266,7 +274,14 @@ async def run_codex_app_server_agent(
     session.commit()
     session.refresh(record)
 
+    begin_codex_run(session, worker)
+    heartbeat_stop = asyncio.Event()
+    heartbeat_task = asyncio.create_task(
+        maintain_codex_heartbeat(session, worker, heartbeat_stop)
+    )
     app_server: CodexAppServerProcess | None = None
+    worker_success = False
+    worker_offline = False
     try:
         app_server = await CodexAppServerProcess.start(command, str(cwd))
         result = await asyncio.wait_for(
@@ -278,6 +293,7 @@ async def run_codex_app_server_agent(
         record.output_payload = result["agent_text"]
         record.stderr = result["diagnostics"]
         record.status = RunStatus.SUCCEEDED if result["completed"] else RunStatus.FAILED
+        worker_success = record.status == RunStatus.SUCCEEDED
         if not result["completed"]:
             record.error_message = "Codex turn did not complete"
         if run_type == "codex_archive" and record.status == RunStatus.SUCCEEDED:
@@ -288,9 +304,22 @@ async def run_codex_app_server_agent(
     except (OSError, RuntimeError, websockets.WebSocketException) as exc:
         record.status = RunStatus.FAILED
         record.error_message = str(exc) or repr(exc)
+        worker_offline = isinstance(exc, OSError) and app_server is None
     finally:
         if app_server:
-            await app_server.stop()
+            try:
+                await app_server.stop()
+            except (OSError, RuntimeError) as exc:
+                record.status = RunStatus.FAILED
+                record.error_message = record.error_message or f"Codex App Server cleanup failed: {exc}"
+                worker_success = False
+        await stop_codex_heartbeat(heartbeat_stop, heartbeat_task)
+        finish_codex_run(
+            session,
+            worker,
+            success=worker_success,
+            offline=worker_offline,
+        )
         record.finished_at = app_now()
         session.add(record)
         session.add(

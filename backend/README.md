@@ -70,8 +70,20 @@ Gemini uses the same state vocabulary for API calls:
 - API error or timeout: `FAILED`.
 
 Concurrent Gemini requests are counted in the backend process, so the worker
-stays `RUNNING` until the last active request finishes. Codex remains `OFFLINE`
-until its provider-specific status probe is implemented.
+stays `RUNNING` until the last active request finishes.
+
+Codex uses its existing per-run App Server adapter without changing the stable
+process or WebSocket implementation:
+
+- configured command unavailable: `OFFLINE`;
+- command available and idle: `ONLINE`;
+- App Server startup and the complete WebSocket turn: `RUNNING`, with heartbeat;
+- startup failure: `OFFLINE`;
+- timeout, incomplete turn, WebSocket failure, or cleanup failure: `FAILED`.
+
+Concurrent Codex runs keep the worker in `RUNNING` until the final active run
+finishes. A stale `RUNNING` record with no in-process run and a heartbeat older
+than 30 seconds is recovered as `FAILED`.
 
 ## Test
 

@@ -137,6 +137,9 @@ const geminiWorking = computed(() => {
 const claudeWorking = computed(() => {
   return store.workers.find((worker) => worker.worker_key === 'claude')?.status === 'RUNNING'
 })
+const codexWorking = computed(() => {
+  return store.workers.find((worker) => worker.worker_key === 'codex')?.status === 'RUNNING'
+})
 
 const taskFactsTrigger = computed(() => {
   if (!currentTaskId.value) return ''
@@ -684,11 +687,18 @@ onBeforeUnmount(() => {
           'is-dragging': draggingClass === agent.key,
           'is-working': agent.key === 'gemini' && geminiWorking,
           'is-claude-working': agent.key === 'claude' && claudeWorking,
+          'is-codex-working': agent.key === 'codex' && codexWorking,
         },
       ]"
       :style="{ transform: `translate3d(${positions[agent.key].x}px, ${positions[agent.key].y}px, 0)` }"
       :title="agent.name"
-      :aria-busy="agent.key === 'gemini' ? geminiWorking : undefined"
+      :aria-busy="
+        agent.key === 'gemini'
+          ? geminiWorking
+          : agent.key === 'claude'
+            ? claudeWorking
+            : codexWorking
+      "
       type="button"
       @pointermove="onPointerMove"
       @pointerdown="onPointerDown($event, agent.key)"
@@ -896,6 +906,11 @@ onBeforeUnmount(() => {
   animation: gemini-working-float 2.4s ease-in-out infinite;
 }
 
+.floating-agent-icon.is-codex-working {
+  border-color: rgba(76, 72, 214, 0.68);
+  animation: gemini-working-float 2.4s ease-in-out infinite;
+}
+
 .floating-agent-icon.is-claude-working {
   border-color: rgba(217, 119, 87, 0.62);
   box-shadow:
@@ -923,7 +938,9 @@ onBeforeUnmount(() => {
 }
 
 .floating-agent-icon.is-working::before,
-.floating-agent-icon.is-working::after {
+.floating-agent-icon.is-working::after,
+.floating-agent-icon.is-codex-working::before,
+.floating-agent-icon.is-codex-working::after {
   position: absolute;
   inset: -7px;
   z-index: -1;
@@ -949,12 +966,38 @@ onBeforeUnmount(() => {
   animation: gemini-working-ring 1.8s ease-out infinite;
 }
 
+.floating-agent-icon.is-codex-working::before {
+  background: radial-gradient(
+    circle,
+    rgba(122, 132, 255, 0.46) 0%,
+    rgba(79, 70, 229, 0.28) 46%,
+    rgba(91, 33, 182, 0) 74%
+  );
+  filter: blur(7px);
+  animation: gemini-working-glow 1.8s ease-in-out infinite;
+}
+
+.floating-agent-icon.is-codex-working::after {
+  inset: -4px;
+  border: 1px solid rgba(124, 112, 255, 0.62);
+  animation: gemini-working-ring 1.8s ease-out infinite;
+}
+
 .floating-agent-icon.is-working:hover,
 .floating-agent-icon.is-working:focus-visible {
   border-color: rgba(66, 133, 244, 0.72);
   box-shadow:
     0 16px 34px rgba(16, 24, 40, 0.2),
     0 0 22px rgba(66, 133, 244, 0.34);
+}
+
+.floating-agent-icon.is-codex-working:hover,
+.floating-agent-icon.is-codex-working:focus-visible {
+  border-color: rgba(79, 70, 229, 0.82);
+  box-shadow:
+    0 16px 34px rgba(16, 24, 40, 0.2),
+    0 0 24px rgba(79, 70, 229, 0.42),
+    0 0 42px rgba(91, 33, 182, 0.22);
 }
 
 @keyframes gemini-working-glow {
@@ -997,8 +1040,11 @@ onBeforeUnmount(() => {
 @media (prefers-reduced-motion: reduce) {
   .floating-agent-icon.is-working,
   .floating-agent-icon.is-claude-working,
+  .floating-agent-icon.is-codex-working,
   .floating-agent-icon.is-working::before,
-  .floating-agent-icon.is-working::after {
+  .floating-agent-icon.is-working::after,
+  .floating-agent-icon.is-codex-working::before,
+  .floating-agent-icon.is-codex-working::after {
     animation: none;
   }
 
@@ -1006,6 +1052,12 @@ onBeforeUnmount(() => {
     box-shadow:
       0 14px 28px rgba(16, 24, 40, 0.16),
       0 0 20px rgba(66, 133, 244, 0.38);
+  }
+
+  .floating-agent-icon.is-codex-working {
+    box-shadow:
+      0 14px 28px rgba(16, 24, 40, 0.16),
+      0 0 22px rgba(79, 70, 229, 0.42);
   }
 }
 
