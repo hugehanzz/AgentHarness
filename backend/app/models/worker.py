@@ -7,17 +7,11 @@ from sqlmodel import Field, SQLModel
 from app.models.common import app_now
 
 
-class WorkerRole(StrEnum):
-    CODEX = "CODEX"
-    REVIEWER = "REVIEWER"
-    GEMINI = "GEMINI"
-
-
 class WorkerStatus(StrEnum):
-    IDLE = "IDLE"
+    ONLINE = "ONLINE"
     RUNNING = "RUNNING"
-    OFFLINE = "OFFLINE"
     FAILED = "FAILED"
+    OFFLINE = "OFFLINE"
 
 
 class RunStatus(StrEnum):
@@ -36,13 +30,12 @@ class AgentSessionStatus(StrEnum):
 
 class AgentWorker(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
-    name: str = Field(index=True, unique=True, max_length=120)
-    role: WorkerRole = Field(index=True)
-    worker_type: str = Field(default="internal", max_length=80)
-    status: WorkerStatus = Field(default=WorkerStatus.IDLE, index=True)
+    worker_key: str = Field(index=True, unique=True, max_length=50)
+    name: str = Field(max_length=120)
+    role: str = Field(max_length=80)
+    provider_type: str = Field(max_length=80)
+    status: WorkerStatus = Field(default=WorkerStatus.OFFLINE, index=True)
     last_heartbeat_at: datetime | None = None
-    current_task_id: int | None = Field(default=None, foreign_key="task.id")
-    created_at: datetime = Field(default_factory=app_now)
 
 
 class AgentRun(SQLModel, table=True):

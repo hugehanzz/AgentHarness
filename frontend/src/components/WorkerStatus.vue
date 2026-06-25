@@ -1,19 +1,28 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onBeforeUnmount, onMounted } from 'vue'
 import { Cpu, Refresh, User, View } from '@element-plus/icons-vue'
 import { useTasksStore } from '../stores/tasks'
 
 const store = useTasksStore()
+const pollIntervalMs = 5000
+let pollTimer: ReturnType<typeof window.setInterval> | null = null
 
-function displayStatus(worker: { name: string; status: string; is_online: boolean }) {
-  return worker.is_online ? worker.status : 'OFFLINE'
+function statusClass(status: string) {
+  return status.toLowerCase()
 }
 
-function isDisplayOnline(worker: { name: string; is_online: boolean }) {
-  return worker.is_online
+function heartbeatTitle(value: string | null) {
+  return value ? `Last heartbeat: ${value.replace('T', ' ')}` : 'No heartbeat'
 }
 
-onMounted(() => store.fetchWorkers())
+onMounted(() => {
+  store.fetchWorkers()
+  pollTimer = window.setInterval(() => store.fetchWorkers(), pollIntervalMs)
+})
+
+onBeforeUnmount(() => {
+  if (pollTimer) window.clearInterval(pollTimer)
+})
 </script>
 
 <template>
@@ -35,14 +44,17 @@ onMounted(() => store.fetchWorkers())
         <span>{{ worker.name }}</span>
         <span class="registry-role">
           <el-icon>
-            <Cpu v-if="worker.role.includes('CODEX')" />
-            <View v-else-if="worker.role.includes('REVIEW')" />
+            <Cpu v-if="worker.worker_key === 'codex'" />
+            <View v-else-if="worker.worker_key === 'claude'" />
             <User v-else />
           </el-icon>
           {{ worker.role }}
         </span>
-        <span :class="['registry-status', isDisplayOnline(worker) ? 'online' : 'offline']">
-          <i></i>{{ displayStatus(worker) }}
+        <span
+          :class="['registry-status', statusClass(worker.status)]"
+          :title="heartbeatTitle(worker.last_heartbeat_at)"
+        >
+          <i></i>{{ worker.status }}
         </span>
       </div>
     </div>

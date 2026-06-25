@@ -1,7 +1,7 @@
 from sqlmodel import Session, SQLModel, create_engine, select
 
 import app.models  # noqa: F401
-from app.models.worker import AgentWorker, WorkerRole
+from app.models.worker import AgentWorker, WorkerStatus
 from app.scheduler.workers import ensure_workers, heartbeat_workers
 
 
@@ -14,33 +14,56 @@ def test_ensure_workers_creates_collaboration_agents():
         workers = session.exec(select(AgentWorker).order_by(AgentWorker.name)).all()
 
         assert {worker.name for worker in workers} == {
-            "Claude-DeepSeek",
+            "Claude",
             "Codex",
             "Gemini",
         }
         assert {worker.role for worker in workers} == {
-            WorkerRole.CODEX,
-            WorkerRole.GEMINI,
-            WorkerRole.REVIEWER,
+            "Developer",
+            "Coordinator",
+            "Reviewer",
         }
-        assert {worker.worker_type for worker in workers} == {
+        assert {worker.provider_type for worker in workers} == {
             "codex_app_server",
-            "local_cli_agent",
-            "planned_agent",
+            "claude_cli",
+            "gemini_api",
         }
+        assert {worker.worker_key for worker in workers} == {"codex", "claude", "gemini"}
 
 
-def test_human_and_external_agents_do_not_receive_fake_heartbeat():
+def test_ensure_workers_does_not_overwrite_database_configuration():
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
 
     with Session(engine) as session:
         ensure_workers(session)
+        claude = session.exec(select(AgentWorker).where(AgentWorker.worker_key == "claude")).one()
+        claude.name = "Custom Claude"
+        claude.role = "Custom Role"
+        session.add(claude)
+        session.commit()
+
+        ensure_workers(session)
+        session.refresh(claude)
+
+        assert claude.name == "Custom Claude"
+        assert claude.role == "Custom Role"
+
+
+def test_claude_heartbeat_marks_available_cli_online(monkeypatch, tmp_path):
+    engine = create_engine("sqlite:///:memory:")
+    SQLModel.metadata.create_all(engine)
+    executable = tmp_path / "claude"
+    executable.write_text("", encoding="utf-8")
+    monkeypatch.setattr(
+        "app.scheduler.workers.get_settings",
+        lambda: type("Settings", (), {"agent_claude_command": str(executable)})(),
+    )
+
+    with Session(engine) as session:
+        ensure_workers(session)
         heartbeat_workers(session)
-        workers = session.exec(select(AgentWorker)).all()
+        claude = session.exec(select(AgentWorker).where(AgentWorker.worker_key == "claude")).one()
 
-        skipped_workers = [worker for worker in workers if worker.worker_type != "local_cli_agent"]
-        local_cli_workers = [worker for worker in workers if worker.worker_type == "local_cli_agent"]
-
-        assert all(worker.last_heartbeat_at is None for worker in skipped_workers)
-        assert all(worker.last_heartbeat_at is not None for worker in local_cli_workers)
+        assert claude.status == WorkerStatus.ONLINE
+        assert claude.last_heartbeat_at is not None

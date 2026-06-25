@@ -128,6 +128,9 @@ const canSendChatDraft = computed(() => chatDraft.value.trim().length > 0 && !ch
 const activeChatScope = computed(() => (currentTaskId.value ? `task:${currentTaskId.value}` : 'home'))
 const activeChatMessages = computed(() => chatMessagesByScope[activeChatScope.value] || [])
 const geminiWorking = computed(() => briefLoading.value || briefPrefetching.value || chatStreaming.value)
+const claudeWorking = computed(() => {
+  return store.workers.find((worker) => worker.worker_key === 'claude')?.status === 'RUNNING'
+})
 
 const taskFactsTrigger = computed(() => {
   if (!currentTaskId.value) return ''
@@ -674,6 +677,7 @@ onBeforeUnmount(() => {
         {
           'is-dragging': draggingClass === agent.key,
           'is-working': agent.key === 'gemini' && geminiWorking,
+          'is-claude-working': agent.key === 'claude' && claudeWorking,
         },
       ]"
       :style="{ transform: `translate3d(${positions[agent.key].x}px, ${positions[agent.key].y}px, 0)` }"
@@ -886,6 +890,32 @@ onBeforeUnmount(() => {
   animation: gemini-working-float 2.4s ease-in-out infinite;
 }
 
+.floating-agent-icon.is-claude-working {
+  border-color: rgba(217, 119, 87, 0.62);
+  box-shadow:
+    0 14px 28px rgba(16, 24, 40, 0.16),
+    0 0 24px rgba(196, 104, 74, 0.38),
+    0 0 42px rgba(124, 91, 180, 0.24);
+  animation: claude-working-glow 1.8s ease-in-out infinite;
+}
+
+@keyframes claude-working-glow {
+  0%,
+  100% {
+    box-shadow:
+      0 14px 28px rgba(16, 24, 40, 0.16),
+      0 0 18px rgba(196, 104, 74, 0.28),
+      0 0 30px rgba(124, 91, 180, 0.16);
+  }
+
+  50% {
+    box-shadow:
+      0 16px 32px rgba(16, 24, 40, 0.2),
+      0 0 28px rgba(217, 119, 87, 0.52),
+      0 0 48px rgba(124, 91, 180, 0.3);
+  }
+}
+
 .floating-agent-icon.is-working::before,
 .floating-agent-icon.is-working::after {
   position: absolute;
@@ -960,6 +990,7 @@ onBeforeUnmount(() => {
 
 @media (prefers-reduced-motion: reduce) {
   .floating-agent-icon.is-working,
+  .floating-agent-icon.is-claude-working,
   .floating-agent-icon.is-working::before,
   .floating-agent-icon.is-working::after {
     animation: none;

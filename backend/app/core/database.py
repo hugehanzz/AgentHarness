@@ -16,8 +16,6 @@ def init_db() -> None:
     ensure_task_text_columns()
     ensure_agent_run_columns()
     ensure_command_run_columns()
-    ensure_agent_worker_role_column()
-    cleanup_stale_agent_workers()
 
 
 def ensure_task_text_columns() -> None:
@@ -105,63 +103,6 @@ def ensure_command_run_columns() -> None:
                 connection.execute(text(f"ALTER TABLE commandrun MODIFY COLUMN {name} TEXT NULL"))
             else:
                 connection.execute(text(f"ALTER TABLE commandrun ALTER COLUMN {name} TYPE TEXT"))
-
-
-def ensure_agent_worker_role_column() -> None:
-    inspector = inspect(engine)
-    if not inspector.has_table("agentworker"):
-        return
-
-    dialect = engine.dialect.name
-    if dialect != "mysql":
-        return
-
-    with engine.begin() as connection:
-        connection.execute(text("ALTER TABLE agentworker MODIFY COLUMN role VARCHAR(80) NOT NULL"))
-        connection.execute(
-            text(
-                "UPDATE agentworker "
-                "SET role = 'CODEX', worker_type = 'codex_app_server' "
-                "WHERE name = 'Codex'"
-            )
-        )
-        connection.execute(
-            text(
-                "UPDATE agentworker "
-                "SET role = 'REVIEWER', worker_type = 'local_cli_agent' "
-                "WHERE name = 'Claude-DeepSeek'"
-            )
-        )
-        connection.execute(
-            text(
-                "UPDATE agentworker "
-                "SET role = 'GEMINI', worker_type = 'planned_agent' "
-                "WHERE name = 'Gemini'"
-            )
-        )
-
-
-def cleanup_stale_agent_workers() -> None:
-    inspector = inspect(engine)
-    if not inspector.has_table("agentworker"):
-        return
-
-    active_names = "'Codex', 'Claude-DeepSeek', 'Gemini'"
-    if not inspector.has_table("agentrun"):
-        with engine.begin() as connection:
-            connection.execute(text(f"DELETE FROM agentworker WHERE name NOT IN ({active_names})"))
-        return
-
-    with engine.begin() as connection:
-        connection.execute(
-            text(
-                "DELETE FROM agentworker "
-                f"WHERE name NOT IN ({active_names}) "
-                "AND id NOT IN ("
-                "SELECT DISTINCT worker_id FROM agentrun WHERE worker_id IS NOT NULL"
-                ")"
-            )
-        )
 
 
 def get_session() -> Generator[Session, None, None]:

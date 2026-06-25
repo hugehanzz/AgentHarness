@@ -8,7 +8,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 
 import app.models  # noqa: F401
 from app.models.task import TaskEvent
-from app.models.worker import AgentRun, AgentSession, AgentSessionStatus, RunStatus
+from app.models.worker import AgentRun, AgentSession, AgentSessionStatus, AgentWorker, RunStatus, WorkerStatus
 from app.scheduler.workers import ensure_workers
 from app.schemas.task import TaskCreate
 from app.services import agent_run_service
@@ -48,11 +48,11 @@ def test_run_local_agent_records_cli_output(monkeypatch, tmp_path):
         lambda: SimpleNamespace(agent_claude_command="claude", agent_timeout_seconds=5),
     )
 
-    def fake_run(command, **kwargs):
+    async def fake_execute(command, cwd, prompt, timeout_seconds):
         assert command[:2] == ["claude", "-p"]
         assert "--resume" not in command
-        assert "任务标题：Build task" in kwargs["input"]
-        return SimpleNamespace(
+        assert "任务标题：Build task" in prompt
+        return agent_run_service.ClaudeProcessResult(
             returncode=0,
             stdout=json.dumps(
                 {
@@ -68,7 +68,7 @@ def test_run_local_agent_records_cli_output(monkeypatch, tmp_path):
             stderr="",
         )
 
-    monkeypatch.setattr(agent_run_service.subprocess, "run", fake_run)
+    monkeypatch.setattr(agent_run_service, "execute_claude_command", fake_execute)
 
     with Session(engine) as session:
         ensure_workers(session)
@@ -92,6 +92,9 @@ def test_run_local_agent_records_cli_output(monkeypatch, tmp_path):
         assert saved_session
         assert saved_session.external_session_id == "claude-session-1"
         assert saved_session.task_count == 1
+        claude = session.exec(select(AgentWorker).where(AgentWorker.worker_key == "claude")).one()
+        assert claude.status == WorkerStatus.ONLINE
+        assert claude.last_heartbeat_at is not None
         event = session.exec(select(TaskEvent).where(TaskEvent.task_id == task.id)).all()[-1]
         assert event.event_type == "AGENT_RUN_COMPLETED"
 
@@ -105,9 +108,9 @@ def test_run_local_agent_uses_prompt_override(monkeypatch, tmp_path):
         lambda: SimpleNamespace(agent_claude_command="claude", agent_timeout_seconds=5),
     )
 
-    def fake_run(command, **kwargs):
-        assert kwargs["input"] == "custom review prompt"
-        return SimpleNamespace(
+    async def fake_execute(command, cwd, prompt, timeout_seconds):
+        assert prompt == "custom review prompt"
+        return agent_run_service.ClaudeProcessResult(
             returncode=0,
             stdout=json.dumps(
                 {
@@ -123,7 +126,7 @@ def test_run_local_agent_uses_prompt_override(monkeypatch, tmp_path):
             stderr="",
         )
 
-    monkeypatch.setattr(agent_run_service.subprocess, "run", fake_run)
+    monkeypatch.setattr(agent_run_service, "execute_claude_command", fake_execute)
 
     with Session(engine) as session:
         ensure_workers(session)
@@ -148,9 +151,9 @@ def test_claude_recheck_reuses_task_session_without_incrementing(monkeypatch, tm
     )
     commands = []
 
-    def fake_run(command, **kwargs):
+    async def fake_execute(command, cwd, prompt, timeout_seconds):
         commands.append(command)
-        return SimpleNamespace(
+        return agent_run_service.ClaudeProcessResult(
             returncode=0,
             stdout=json.dumps(
                 {
@@ -166,7 +169,7 @@ def test_claude_recheck_reuses_task_session_without_incrementing(monkeypatch, tm
             stderr="",
         )
 
-    monkeypatch.setattr(agent_run_service.subprocess, "run", fake_run)
+    monkeypatch.setattr(agent_run_service, "execute_claude_command", fake_execute)
 
     with Session(engine) as session:
         ensure_workers(session)
@@ -196,10 +199,10 @@ def test_claude_session_rotates_after_five_distinct_tasks(monkeypatch, tmp_path)
     )
     calls = []
 
-    def fake_run(command, **kwargs):
+    async def fake_execute(command, cwd, prompt, timeout_seconds):
         calls.append(command)
         session_id = "claude-session-2" if len(calls) == 1 else "claude-session-unexpected"
-        return SimpleNamespace(
+        return agent_run_service.ClaudeProcessResult(
             returncode=0,
             stdout=json.dumps(
                 {
@@ -215,7 +218,7 @@ def test_claude_session_rotates_after_five_distinct_tasks(monkeypatch, tmp_path)
             stderr="",
         )
 
-    monkeypatch.setattr(agent_run_service.subprocess, "run", fake_run)
+    monkeypatch.setattr(agent_run_service, "execute_claude_command", fake_execute)
 
     with Session(engine) as session:
         ensure_workers(session)

@@ -42,13 +42,12 @@ export interface TaskEvent {
 
 export interface Worker {
   id: number
+  worker_key: 'codex' | 'claude' | 'gemini' | string
   name: string
   role: string
-  worker_type: string
-  status: string
+  provider_type: string
+  status: 'ONLINE' | 'RUNNING' | 'FAILED' | 'OFFLINE'
   last_heartbeat_at: string | null
-  current_task_id: number | null
-  is_online: boolean
 }
 
 export interface AgentRun {

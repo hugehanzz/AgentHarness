@@ -47,6 +47,23 @@ FLUSH PRIVILEGES;
 uvicorn app.main:app --reload
 ```
 
+## Worker registry
+
+`agentworker` is the source of truth for worker identity and display metadata.
+The backend locates integrations by immutable `worker_key` values (`codex`,
+`claude`, and `gemini`) and does not overwrite existing names, roles, or
+provider types during startup.
+
+Claude is currently the first provider with a complete worker lifecycle:
+
+- `OFFLINE`: the configured Claude executable is unavailable.
+- `ONLINE`: the Claude CLI is available and idle.
+- `RUNNING`: a review or recheck subprocess is active; heartbeat is refreshed.
+- `FAILED`: the latest Claude run failed or timed out.
+
+Codex and Gemini remain `OFFLINE` until their provider-specific status probes
+are implemented.
+
 ## Test
 
 ```bash

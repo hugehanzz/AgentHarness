@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import dataclass
 import json
 import os
 import shlex
@@ -15,7 +16,14 @@ from app.core.config import get_settings
 from app.models.common import app_now
 from app.models.prompt import PromptType
 from app.models.task import TaskEvent
-from app.models.worker import AgentRun, AgentSession, AgentSessionStatus, AgentWorker, RunStatus
+from app.models.worker import (
+    AgentRun,
+    AgentSession,
+    AgentSessionStatus,
+    AgentWorker,
+    RunStatus,
+    WorkerStatus,
+)
 from app.prompts.templates import build_prompt
 from app.services.archive_check import check_readme_archive
 from app.services.task_service import get_task_or_404
@@ -32,12 +40,12 @@ CODEX_APP_SERVER_RUN_TYPES = {
 
 LOCAL_CLI_RUN_DEFINITIONS: dict[str, dict[str, str]] = {
     "claude_review": {
-        "worker_name": "Claude-DeepSeek",
+        "worker_key": "claude",
         "prompt_type": PromptType.CLAUDE_REVIEW,
         "command_setting": "agent_claude_command",
     },
     "claude_recheck": {
-        "worker_name": "Claude-DeepSeek",
+        "worker_key": "claude",
         "prompt_type": PromptType.CLAUDE_RECHECK,
         "command_setting": "agent_claude_command",
     },
@@ -46,6 +54,14 @@ LOCAL_CLI_RUN_DEFINITIONS: dict[str, dict[str, str]] = {
 
 CLAUDE_PROVIDER_TYPE = "claude_cli"
 CLAUDE_SESSION_TASK_LIMIT = 5
+CLAUDE_HEARTBEAT_INTERVAL_SECONDS = 10
+
+
+@dataclass
+class ClaudeProcessResult:
+    returncode: int
+    stdout: str
+    stderr: str
 
 
 def split_command(command_value: str) -> list[str]:
@@ -62,6 +78,51 @@ def find_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
         return int(sock.getsockname()[1])
+
+
+async def execute_claude_command(
+    command: list[str],
+    cwd: str,
+    prompt: str,
+    timeout_seconds: int,
+) -> ClaudeProcessResult:
+    process = await asyncio.create_subprocess_exec(
+        *command,
+        cwd=cwd,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(
+            process.communicate(prompt.encode("utf-8")),
+            timeout=timeout_seconds,
+        )
+    except TimeoutError:
+        process.kill()
+        await process.wait()
+        raise
+    return ClaudeProcessResult(
+        returncode=process.returncode or 0,
+        stdout=stdout.decode("utf-8", errors="replace"),
+        stderr=stderr.decode("utf-8", errors="replace"),
+    )
+
+
+async def maintain_worker_heartbeat(
+    session: Session,
+    worker: AgentWorker,
+    stop_event: asyncio.Event,
+    interval_seconds: int = CLAUDE_HEARTBEAT_INTERVAL_SECONDS,
+) -> None:
+    while not stop_event.is_set():
+        worker.last_heartbeat_at = app_now()
+        session.add(worker)
+        session.commit()
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
+        except TimeoutError:
+            continue
 
 
 def get_latest_codex_thread_id(session: Session, task_id: int) -> str | None:
@@ -185,7 +246,7 @@ async def run_codex_app_server_agent(
     if not command:
         raise HTTPException(status_code=400, detail="CODEX_APP_SERVER_COMMAND is empty")
 
-    worker = session.exec(select(AgentWorker).where(AgentWorker.name == "Codex")).first()
+    worker = session.exec(select(AgentWorker).where(AgentWorker.worker_key == "codex")).first()
     prompt = resolve_prompt(task, CODEX_APP_SERVER_RUN_TYPES[run_type], prompt_override)
     existing_thread_id = get_latest_codex_thread_id(session, task.id)
     now = app_now()
@@ -302,7 +363,11 @@ async def run_local_agent(
     if not command:
         raise HTTPException(status_code=400, detail="Configured agent command is empty")
 
-    worker = session.exec(select(AgentWorker).where(AgentWorker.name == definition["worker_name"])).first()
+    worker = session.exec(
+        select(AgentWorker).where(AgentWorker.worker_key == definition["worker_key"])
+    ).first()
+    if not worker:
+        raise HTTPException(status_code=503, detail="Claude worker is not registered")
     prompt_type = PromptType(definition["prompt_type"])
     prompt = resolve_prompt(task, prompt_type, prompt_override)
     claude_session = get_or_create_claude_session(session, task.id, str(cwd))
@@ -326,22 +391,21 @@ async def run_local_agent(
         started_at=now,
     )
     session.add(record)
+    worker.status = WorkerStatus.RUNNING
+    worker.last_heartbeat_at = now
+    session.add(worker)
     session.commit()
     session.refresh(record)
 
+    heartbeat_stop = asyncio.Event()
+    heartbeat_task = asyncio.create_task(maintain_worker_heartbeat(session, worker, heartbeat_stop))
+    worker_final_status = WorkerStatus.FAILED
     try:
-        completed = await asyncio.to_thread(
-            subprocess.run,
+        completed = await execute_claude_command(
             run_command,
-            cwd=str(cwd),
-            input=prompt,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=settings.agent_timeout_seconds,
-            check=False,
+            str(cwd),
+            prompt,
+            settings.agent_timeout_seconds,
         )
         parsed = parse_claude_json_output(completed.stdout)
         session_id = extract_claude_session_id(parsed)
@@ -351,11 +415,15 @@ async def run_local_agent(
         record.external_thread_id = session_id or resume_session_id
         record.external_turn_id = extract_claude_turn_id(parsed)
         record.status = RunStatus.SUCCEEDED if completed.returncode == 0 and not is_claude_error(parsed) else RunStatus.FAILED
+        worker_final_status = (
+            WorkerStatus.ONLINE if record.status == RunStatus.SUCCEEDED else WorkerStatus.FAILED
+        )
         if completed.returncode != 0:
             record.error_message = completed.stderr or completed.stdout or f"Claude CLI exited with {completed.returncode}"
         if not parsed and completed.stdout:
             record.error_message = "Claude CLI did not return valid JSON"
             record.status = RunStatus.FAILED
+            worker_final_status = WorkerStatus.FAILED
         if record.status == RunStatus.SUCCEEDED and session_id:
             claude_session.external_session_id = session_id
             claude_session.status = AgentSessionStatus.ACTIVE
@@ -367,15 +435,21 @@ async def run_local_agent(
             claude_session.status = AgentSessionStatus.FAILED
             claude_session.updated_at = app_now()
             session.add(claude_session)
-    except subprocess.TimeoutExpired:
+    except TimeoutError:
         record.status = RunStatus.TIMED_OUT
         record.error_message = "Claude CLI command timed out"
     except OSError as exc:
         record.status = RunStatus.FAILED
         record.error_message = str(exc)
+        worker_final_status = WorkerStatus.OFFLINE
     finally:
+        heartbeat_stop.set()
+        await heartbeat_task
         record.finished_at = app_now()
+        worker.status = worker_final_status
+        worker.last_heartbeat_at = app_now() if worker_final_status != WorkerStatus.OFFLINE else None
         session.add(record)
+        session.add(worker)
         session.add(
             TaskEvent(
                 task_id=task.id,
