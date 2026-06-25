@@ -39,6 +39,32 @@ def test_run_local_agent_requires_configured_command(monkeypatch, tmp_path):
         assert "AGENT_CLAUDE_COMMAND" in exc_info.value.detail
 
 
+def test_execute_claude_command_uses_bounded_thread_subprocess(monkeypatch, tmp_path):
+    captured = {}
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(returncode=0, stdout='{"result":"ok"}', stderr="")
+
+    monkeypatch.setattr(agent_run_service.subprocess, "run", fake_run)
+
+    result = asyncio.run(
+        agent_run_service.execute_claude_command(
+            ["claude", "-p"],
+            str(tmp_path),
+            "review prompt",
+            12,
+        )
+    )
+
+    assert result.returncode == 0
+    assert captured["command"] == ["claude", "-p"]
+    assert captured["kwargs"]["input"] == "review prompt"
+    assert captured["kwargs"]["timeout"] == 12
+    assert captured["kwargs"]["check"] is False
+
+
 def test_run_local_agent_records_cli_output(monkeypatch, tmp_path):
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
@@ -97,6 +123,36 @@ def test_run_local_agent_records_cli_output(monkeypatch, tmp_path):
         assert claude.last_heartbeat_at is not None
         event = session.exec(select(TaskEvent).where(TaskEvent.task_id == task.id)).all()[-1]
         assert event.event_type == "AGENT_RUN_COMPLETED"
+
+
+def test_run_local_agent_records_unexpected_execution_error(monkeypatch, tmp_path):
+    engine = create_engine("sqlite:///:memory:")
+    SQLModel.metadata.create_all(engine)
+    monkeypatch.setattr(
+        agent_run_service,
+        "get_settings",
+        lambda: SimpleNamespace(agent_claude_command="claude", agent_timeout_seconds=5),
+    )
+
+    async def fail_execute(command, cwd, prompt, timeout_seconds):
+        raise NotImplementedError("async subprocess transport unavailable")
+
+    monkeypatch.setattr(agent_run_service, "execute_claude_command", fail_execute)
+
+    with Session(engine) as session:
+        ensure_workers(session)
+        task = create_task(
+            session,
+            TaskCreate(title="Review task", description="Requirement", workspace_path=str(tmp_path)),
+        )
+
+        run = asyncio.run(run_local_agent(session, task.id, "claude_review"))
+        claude = session.exec(select(AgentWorker).where(AgentWorker.worker_key == "claude")).one()
+
+        assert run.status == RunStatus.FAILED
+        assert run.finished_at is not None
+        assert run.error_message == "async subprocess transport unavailable"
+        assert claude.status == WorkerStatus.FAILED
 
 
 def test_run_local_agent_uses_prompt_override(monkeypatch, tmp_path):

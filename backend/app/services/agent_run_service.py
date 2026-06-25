@@ -92,26 +92,26 @@ async def execute_claude_command(
     prompt: str,
     timeout_seconds: int,
 ) -> ClaudeProcessResult:
-    process = await asyncio.create_subprocess_exec(
-        *command,
+    # Claude CLI is a provider adapter, not a Safe Command. Run the existing
+    # bounded subprocess in a worker thread so Windows uvicorn --reload event
+    # loops do not need to provide asyncio subprocess support.
+    completed = await asyncio.to_thread(
+        subprocess.run,
+        command,
         cwd=cwd,
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
+        input=prompt,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=timeout_seconds,
+        check=False,
     )
-    try:
-        stdout, stderr = await asyncio.wait_for(
-            process.communicate(prompt.encode("utf-8")),
-            timeout=timeout_seconds,
-        )
-    except TimeoutError:
-        process.kill()
-        await process.wait()
-        raise
     return ClaudeProcessResult(
-        returncode=process.returncode or 0,
-        stdout=stdout.decode("utf-8", errors="replace"),
-        stderr=stderr.decode("utf-8", errors="replace"),
+        returncode=completed.returncode,
+        stdout=completed.stdout,
+        stderr=completed.stderr,
     )
 
 
@@ -461,13 +461,17 @@ async def run_local_agent(
             claude_session.status = AgentSessionStatus.FAILED
             claude_session.updated_at = app_now()
             session.add(claude_session)
-    except TimeoutError:
+    except subprocess.TimeoutExpired:
         record.status = RunStatus.TIMED_OUT
         record.error_message = "Claude CLI command timed out"
     except OSError as exc:
         record.status = RunStatus.FAILED
         record.error_message = str(exc)
         worker_final_status = WorkerStatus.OFFLINE
+    except Exception as exc:
+        record.status = RunStatus.FAILED
+        record.error_message = str(exc) or repr(exc)
+        worker_final_status = WorkerStatus.FAILED
     finally:
         heartbeat_stop.set()
         await heartbeat_task

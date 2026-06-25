@@ -8,10 +8,6 @@ const props = defineProps<{ taskId: number; workspacePath: string | null }>()
 const workspacePath = ref(props.workspacePath || '')
 const result = ref<any | null>(null)
 
-function recheckClass(status: string) {
-  return `recheck-${status || 'UNKNOWN'}`
-}
-
 function severityText(severity: string) {
   const labels: Record<string, string> = {
     HIGH: '高',
@@ -66,10 +62,7 @@ async function parseReview() {
         </div>
         <div class="metric review-metric review-metric-low">
           <div class="metric-value">{{ result.low_count }}</div>
-          <div class="review-metric-footer">
-            <span class="metric-label">Low</span>
-            <span :class="['recheck-pill', recheckClass(result.recheck_status)]">{{ result.recheck_status }}</span>
-          </div>
+          <div class="metric-label">Low</div>
         </div>
       </div>
       <el-table :data="result.items" size="small" style="margin-top: 12px;">
