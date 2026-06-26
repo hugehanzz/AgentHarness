@@ -16,11 +16,12 @@ def build_prompt(task: Task, prompt_type: PromptType) -> str:
     templates = {
         PromptType.CODEX_PLAN: "产出实现计划。当前阶段不要修改任何文件。请说明依赖变更、迁移事项、风险点，以及需要 Human Supervisor 审批的门禁。",
         PromptType.CODEX_IMPLEMENT: "按照已确认的计划执行开发，运行相关测试。",
-        PromptType.CLAUDE_REVIEW: "评审Codex的本次代码实现并维护 REVIEW.md。按 High、Medium、Low 严重级别归类问题，并包含开放事项和复查结论。",
+        PromptType.CLAUDE_REVIEW: "评审Codex的本次代码实现并维护 REVIEW.md。按 High、Medium、Low 严重级别归类问题，并包含开放事项和复查结论，不要执行封板。",
         PromptType.CODEX_FIX: "读取 REVIEW.md，修复Claude审查的问题，运行相关验证，并总结变更内容。不要修改 REVIEW.md。",
         PromptType.CLAUDE_RECHECK: (
             "只复查 Codex 对 REVIEW.md 开放问题的修复结果，并更新问题状态和复查结论。"
             "明确复查是 PASSED 还是 FAILED，以及是否仍有开放问题。"
+            "不要执行封板，不要将 review_status 更新为 ARCHIVED。"
         ),
         PromptType.CLAUDE_FINALIZE: (
             "执行 REVIEW.md 最终审查封板，不要重新进行全面代码评审，也不要新增普通审查问题。"

@@ -6,7 +6,7 @@ from app.core.workflow_actions import (
     WorkflowActionDefinition,
     get_workflow_actions,
 )
-from app.models.review import ReviewItem, ReviewItemStatus
+from app.models.review import ReviewItem, is_blocking_review_item_status
 from app.models.worker import AgentRun, RunStatus
 from app.schemas.workflow import (
     ResolvedWorkflowAction,
@@ -161,7 +161,7 @@ def is_recommended_action(
     definition: WorkflowActionDefinition,
     review_items: list[ReviewItem],
 ) -> bool:
-    open_items = [item for item in review_items if item.status == ReviewItemStatus.OPEN]
+    open_items = [item for item in review_items if is_blocking_review_item_status(item.status)]
     if definition.from_status in {TaskStatus.REVIEW_DONE, TaskStatus.RECHECK_DONE}:
         if definition.to_status == TaskStatus.FIX_REQUIRED:
             return bool(open_items)

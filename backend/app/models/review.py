@@ -20,6 +20,16 @@ class ReviewItemStatus(StrEnum):
     WONT_FIX = "WONT_FIX"
 
 
+BLOCKING_REVIEW_ITEM_STATUSES = {
+    ReviewItemStatus.OPEN,
+    ReviewItemStatus.FIXED_PENDING_RECHECK,
+}
+
+
+def is_blocking_review_item_status(status: ReviewItemStatus) -> bool:
+    return status in BLOCKING_REVIEW_ITEM_STATUSES
+
+
 class ReviewItem(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     task_id: int | None = Field(default=None, index=True, foreign_key="task.id")

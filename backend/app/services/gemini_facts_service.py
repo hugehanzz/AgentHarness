@@ -4,7 +4,7 @@ import json
 from sqlmodel import Session
 
 from app.core.state_machine import HUMAN_GATE_STATUSES, TaskStatus
-from app.models.review import ReviewItem, ReviewItemStatus, ReviewSeverity
+from app.models.review import ReviewItem, ReviewSeverity, is_blocking_review_item_status
 from app.schemas.gemini import (
     GeminiAgentRunFact,
     GeminiCommandRunFact,
@@ -159,7 +159,7 @@ def build_workflow_guidance(
 
 
 def build_review_summary(items: list[ReviewItem]) -> GeminiReviewSummary:
-    open_items = [item for item in items if item.status == ReviewItemStatus.OPEN]
+    open_items = [item for item in items if is_blocking_review_item_status(item.status)]
     return GeminiReviewSummary(
         total_count=len(items),
         open_count=len(open_items),

@@ -103,6 +103,28 @@ def test_resolver_recommends_fix_when_review_has_open_items():
         assert actions["进入验收"].agent_run_timing is None
 
 
+def test_resolver_recommends_fix_when_review_has_fixed_pending_recheck_items():
+    with create_memory_session() as session:
+        task = create_task(session, TaskCreate(title="Review done", description="Requirement"))
+        task.status = TaskStatus.REVIEW_DONE
+        session.add(task)
+        session.add(
+            ReviewItem(
+                task_id=task.id,
+                severity=ReviewSeverity.HIGH,
+                title="Needs recheck",
+                status=ReviewItemStatus.FIXED_PENDING_RECHECK,
+            )
+        )
+        session.commit()
+
+        state = resolve_task_workflow(session, task.id)
+        actions = {action.label: action for action in state.actions}
+
+        assert actions["要求修复"].recommended is True
+        assert actions["进入验收"].recommended is False
+
+
 def test_resolver_recommends_acceptance_when_review_has_no_open_items():
     with create_memory_session() as session:
         task = create_task(session, TaskCreate(title="Review done", description="Requirement"))

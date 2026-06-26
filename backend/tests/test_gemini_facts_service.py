@@ -140,6 +140,34 @@ def test_gemini_workflow_guidance_recommends_fix_when_review_has_open_items():
         assert actions["进入验收"].recommended is False
 
 
+def test_gemini_review_summary_treats_fixed_pending_recheck_as_open():
+    engine = create_engine("sqlite:///:memory:")
+    SQLModel.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        task = create_task(session, TaskCreate(title="Recheck pending", description="Requirement"))
+        task.status = TaskStatus.RECHECK_DONE
+        session.add(task)
+        session.add(
+            ReviewItem(
+                task_id=task.id,
+                severity=ReviewSeverity.MEDIUM,
+                title="Claimed fixed but not rechecked",
+                status=ReviewItemStatus.FIXED_PENDING_RECHECK,
+            )
+        )
+        session.commit()
+
+        facts = build_gemini_task_facts(session, task.id)
+        actions = {action.label: action for action in facts.workflow_guidance.available_user_actions}
+
+        assert facts.review_summary.open_count == 1
+        assert facts.review_summary.medium_open_count == 1
+        assert facts.review_summary.open_items == ["Claimed fixed but not rechecked"]
+        assert actions["要求修复"].recommended is True
+        assert actions["进入验收"].recommended is False
+
+
 def test_gemini_facts_use_current_product_button_after_agent_succeeds():
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
