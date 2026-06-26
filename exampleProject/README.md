@@ -14,3 +14,4 @@ examplesProject/
     REVIEW.sample.md
 ```
 
+该测试工程AgentHarnessTest当中的`CLAUDE.md`和`AGENTS.md`是重要参考
