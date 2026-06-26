@@ -43,14 +43,23 @@ def test_workflow_actions_use_product_button_labels():
     ).label == "标记完成"
 
 
-def test_review_to_acceptance_runs_claude_recheck_before_transition():
+def test_review_to_acceptance_enters_finalize_without_running_agent():
     action = get_workflow_action(
         TaskStatus.REVIEW_DONE,
+        TaskStatus.FINALIZE_REQUESTED,
+    )
+
+    assert action.agent_run_type is None
+    assert action.agent_run_timing is None
+
+
+def test_finalize_completion_requires_separate_transition():
+    action = get_workflow_action(
+        TaskStatus.FINALIZE_REQUESTED,
         TaskStatus.ACCEPTANCE_READY,
     )
 
-    assert action.agent_run_type == "claude_recheck"
-    assert action.agent_run_timing == AgentRunTiming.BEFORE_TRANSITION
+    assert action.label == "标记封板完成"
 
 
 def test_human_gate_actions_are_explicit():
@@ -68,3 +77,9 @@ def test_get_workflow_actions_returns_current_state_actions_only():
     actions = get_workflow_actions(TaskStatus.RECHECK_DONE)
 
     assert {action.label for action in actions} == {"进入验收", "要求修复"}
+
+
+def test_finalize_state_exposes_mark_complete_action():
+    actions = get_workflow_actions(TaskStatus.FINALIZE_REQUESTED)
+
+    assert {action.label for action in actions} == {"标记封板完成"}

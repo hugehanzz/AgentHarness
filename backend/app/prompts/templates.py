@@ -19,10 +19,15 @@ def build_prompt(task: Task, prompt_type: PromptType) -> str:
         PromptType.CLAUDE_REVIEW: "评审Codex的本次代码实现并维护 REVIEW.md。按 High、Medium、Low 严重级别归类问题，并包含开放事项和复查结论。",
         PromptType.CODEX_FIX: "读取 REVIEW.md，修复Claude审查的问题，运行相关验证，并总结变更内容。不要修改 REVIEW.md。",
         PromptType.CLAUDE_RECHECK: (
-            "复查修复结果，并在 REVIEW.md 中更新复查结论。"
-            "若复查通过，根据 CLAUDE.md 的 REVIEW.md 维护规范执行历史审查归档。"
-            "即使本轮没有 Codex 修复项，也要根据维护规范执行封版，"
-            "同步更新机器可读状态，并明确是否可以进入验收。"
+            "只复查 Codex 对 REVIEW.md 开放问题的修复结果，并更新问题状态和复查结论。"
+            "明确复查是 PASSED 还是 FAILED，以及是否仍有开放问题。"
+        ),
+        PromptType.CLAUDE_FINALIZE: (
+            "执行 REVIEW.md 最终审查封板，不要重新进行全面代码评审，也不要新增普通审查问题。"
+            "确认当前任务没有 OPEN 或 FIXED_PENDING_RECHECK 的问题，检查机器可读状态、问题计数、"
+            "复查结论和人类可读摘要是否一致。若存在未关闭问题，封板必须失败并说明原因。"
+            "若可以封板，按照 CLAUDE.md 的 REVIEW.md 维护规范归档历史审查，"
+            "将当前任务的 review_status 更新为 ARCHIVED，并写明最终封板结论。"
         ),
         PromptType.ACCEPTANCE_CHECKLIST: (
             "为 Human Supervisor 生成面向人工操作的验收建议。不要替人类宣布验收通过。"

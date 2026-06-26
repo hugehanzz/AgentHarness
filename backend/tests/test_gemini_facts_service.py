@@ -112,7 +112,7 @@ def test_gemini_workflow_guidance_recommends_acceptance_when_review_has_no_open_
         assert "进入验收" in actions
         assert "要求修复" in actions
         assert actions["进入验收"].recommended is True
-        assert any("Claude 复审" in effect for effect in actions["进入验收"].side_effects)
+        assert actions["进入验收"].side_effects == ["任务进入“等待审查封板”状态"]
 
 
 def test_gemini_workflow_guidance_recommends_fix_when_review_has_open_items():

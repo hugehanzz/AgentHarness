@@ -26,3 +26,10 @@ floating icons receive status updates even when the Workers panel is not
 mounted. Gemini keeps its immediate local request glow and also responds to the
 backend `RUNNING` state. Codex uses the same backend state and shows a deeper
 blue-purple version of the Gemini pulse and expanding ring.
+
+## Accept finalization step
+
+`FINALIZE_REQUESTED` is mapped to the existing Accept stage, so the workflow
+still displays nine major stages. The UI first shows `审查封板`; after a
+successful `claude_finalize` run it replaces that action with `标记封板完成`.
+Completing the marker transition enters the existing acceptance-checklist flow.

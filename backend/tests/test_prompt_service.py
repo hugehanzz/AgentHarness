@@ -3,6 +3,7 @@ from sqlmodel import Session, SQLModel, create_engine
 
 import app.models  # noqa: F401
 from app.models.prompt import PromptType
+from app.prompts.templates import build_prompt
 from app.schemas.task import TaskCreate
 from app.services.prompt_service import preview_prompt
 from app.services.task_service import create_task
@@ -19,3 +20,24 @@ def test_preview_prompt_does_not_create_prompt_table_or_record():
 
         assert "任务标题：Preview task" in content
         assert not inspect(engine).has_table("promptrecord")
+
+
+def test_claude_recheck_and_finalize_prompts_keep_separate_responsibilities():
+    task = type(
+        "TaskStub",
+        (),
+        {
+            "id": 1,
+            "title": "Review",
+            "status": "RECHECK_DONE",
+            "workspace_path": "D:/workspace",
+            "description": "Requirement",
+        },
+    )()
+
+    recheck = build_prompt(task, PromptType.CLAUDE_RECHECK)
+    finalize = build_prompt(task, PromptType.CLAUDE_FINALIZE)
+
+    assert "不要执行封板" in recheck
+    assert "最终审查封板" in finalize
+    assert "不要重新进行全面代码评审" in finalize

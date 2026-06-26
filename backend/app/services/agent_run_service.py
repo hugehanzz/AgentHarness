@@ -55,6 +55,11 @@ LOCAL_CLI_RUN_DEFINITIONS: dict[str, dict[str, str]] = {
         "prompt_type": PromptType.CLAUDE_RECHECK,
         "command_setting": "agent_claude_command",
     },
+    "claude_finalize": {
+        "worker_key": "claude",
+        "prompt_type": PromptType.CLAUDE_FINALIZE,
+        "command_setting": "agent_claude_command",
+    },
 }
 
 

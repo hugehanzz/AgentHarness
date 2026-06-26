@@ -81,6 +81,7 @@ const geminiBriefPrefetchStatuses = new Set([
   'IMPLEMENT_DONE',
   'REVIEW_DONE',
   'RECHECK_DONE',
+  'FINALIZE_REQUESTED',
   'ACCEPTANCE_READY',
   'ACCEPTANCE_PASSED',
   'ARCHIVED',

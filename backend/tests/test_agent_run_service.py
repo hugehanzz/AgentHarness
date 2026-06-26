@@ -197,7 +197,7 @@ def test_run_local_agent_uses_prompt_override(monkeypatch, tmp_path):
         assert run.input_payload == "custom review prompt"
 
 
-def test_claude_recheck_reuses_task_session_without_incrementing(monkeypatch, tmp_path):
+def test_claude_recheck_and_finalize_reuse_task_session_without_incrementing(monkeypatch, tmp_path):
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     monkeypatch.setattr(
@@ -236,10 +236,13 @@ def test_claude_recheck_reuses_task_session_without_incrementing(monkeypatch, tm
 
         review_run = asyncio.run(run_local_agent(session, task.id, "claude_review"))
         recheck_run = asyncio.run(run_local_agent(session, task.id, "claude_recheck"))
+        finalize_run = asyncio.run(run_local_agent(session, task.id, "claude_finalize"))
 
         assert review_run.agent_session_id == recheck_run.agent_session_id
+        assert recheck_run.agent_session_id == finalize_run.agent_session_id
         assert "--resume" not in commands[0]
         assert commands[1][-2:] == ["--resume", "claude-session-1"]
+        assert commands[2][-2:] == ["--resume", "claude-session-1"]
         saved_session = session.get(AgentSession, review_run.agent_session_id)
         assert saved_session
         assert saved_session.task_count == 1

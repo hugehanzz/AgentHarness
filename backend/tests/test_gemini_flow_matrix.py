@@ -25,6 +25,12 @@ FLOW_MATRIX = [
     (TaskStatus.RECHECK_REQUESTED, "claude_recheck", {"标记复审完成"}, WorkflowActivityState.AGENT_SUCCEEDED),
     (TaskStatus.RECHECK_DONE, None, {"要求修复", "进入验收"}, WorkflowActivityState.WAITING_FOR_USER),
     (
+        TaskStatus.FINALIZE_REQUESTED,
+        "claude_finalize",
+        {"标记封板完成"},
+        WorkflowActivityState.AGENT_SUCCEEDED,
+    ),
+    (
         TaskStatus.ACCEPTANCE_READY,
         "codex_acceptance_checklist",
         {"标记验收通过"},

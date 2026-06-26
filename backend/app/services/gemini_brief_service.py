@@ -5,12 +5,23 @@ from fastapi import HTTPException
 
 from app.core.state_machine import TaskStatus
 from app.schemas.gemini import GeminiTaskBrief, GeminiTaskFacts
+from app.schemas.workflow import WorkflowActivityState
 from app.services.gemini_context_service import build_gemini_task_context
 from app.services.gemini_service import generate_gemini_text
 
 
 MAX_GENERATION_ATTEMPTS = 2
 INTERNAL_TERMS = tuple(status.value for status in TaskStatus)
+AGENT_RUN_BUTTON_LABELS = {
+    "codex_plan": "运行 Codex Plan",
+    "codex_implement": "运行 Codex Implement",
+    "claude_review": "运行 Claude Review",
+    "codex_fix": "运行 Codex Fix",
+    "claude_recheck": "运行 Claude Recheck",
+    "claude_finalize": "审查封板",
+    "codex_acceptance_checklist": "Codex 给出验收方案",
+    "codex_archive": "运行 Codex Archive",
+}
 
 BRIEF_JSON_SCHEMA = """{
   "summary": "string, concise Chinese summary of current task progress",
@@ -52,7 +63,15 @@ CONTEXT:
 
 
 def build_gemini_brief_context(facts: GeminiTaskFacts) -> dict:
-    return build_gemini_task_context(facts)
+    context = build_gemini_task_context(facts)
+    label = active_agent_button_label(facts)
+    if label:
+        context["active_agent_button"] = {
+            "label": label,
+            "enabled": True,
+            "instruction": f"点击「{label}」继续当前流程。",
+        }
+    return context
 
 
 async def generate_gemini_task_brief(facts: GeminiTaskFacts) -> GeminiTaskBrief:
@@ -109,6 +128,7 @@ def validate_gemini_brief(
     enabled_actions = [action for action in actions if action.enabled]
     disabled_actions = [action for action in actions if not action.enabled]
     recommended_actions = [action for action in enabled_actions if action.recommended]
+    active_button_label = active_agent_button_label(facts)
     steps_text = "\n".join(brief.suggested_next_steps)
 
     for action in disabled_actions:
@@ -119,6 +139,8 @@ def validate_gemini_brief(
     if expected_actions and not any(action.label in steps_text for action in expected_actions):
         labels = "、".join(f"「{action.label}」" for action in expected_actions)
         errors.append(f"下一步建议必须使用后端提供的按钮名称：{labels}")
+    if not expected_actions and active_button_label and active_button_label not in steps_text:
+        errors.append(f"下一步建议必须使用当前可见的 Agent 按钮名称：「{active_button_label}」")
 
     if recommended_actions:
         non_recommended_actions = [
@@ -130,6 +152,8 @@ def validate_gemini_brief(
 
     if not enabled_actions and any(action.label in steps_text for action in actions):
         errors.append("当前没有可用按钮，不得建议用户点击流程按钮")
+    if "REVIEW.md" in all_text and any(keyword in all_text for keyword in ("手动", "修改", "更新", "同步")):
+        errors.append("Gemini 不得建议用户手动修改 REVIEW.md；REVIEW.md 由 Claude 维护")
 
     mentioned_actions = [action for action in actions if action.label in steps_text]
     if (
@@ -170,11 +194,16 @@ def build_fallback_brief(
     model: str,
 ) -> GeminiTaskBrief:
     guidance = facts.workflow_guidance
+    active_button_label = active_agent_button_label(facts)
     enabled_actions = [action for action in guidance.available_user_actions if action.enabled]
     recommended_actions = [action for action in enabled_actions if action.recommended]
     selected_actions = recommended_actions or enabled_actions
 
-    if selected_actions:
+    if active_button_label:
+        suggested_next_steps = [f"点击「{active_button_label}」继续当前流程。"]
+    elif guidance.activity.state == WorkflowActivityState.AGENT_RUNNING:
+        suggested_next_steps = [guidance.activity.message]
+    elif selected_actions:
         suggested_next_steps = [action.instruction for action in selected_actions]
     else:
         blocked_reasons = [
@@ -202,6 +231,15 @@ def build_fallback_brief(
         suggested_next_steps=list(dict.fromkeys(suggested_next_steps)),
         risk_notes=list(dict.fromkeys(risk_notes)),
     )
+
+
+def active_agent_button_label(facts: GeminiTaskFacts) -> str | None:
+    activity = facts.workflow_guidance.activity
+    if activity.state not in {WorkflowActivityState.WAITING_FOR_USER, WorkflowActivityState.AGENT_FAILED}:
+        return None
+    if not activity.agent_run_type:
+        return None
+    return AGENT_RUN_BUTTON_LABELS.get(activity.agent_run_type)
 
 
 def parse_gemini_brief_json(text: str) -> dict:

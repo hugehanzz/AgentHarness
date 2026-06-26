@@ -64,12 +64,12 @@ def test_acceptance_pass_requires_successful_codex_checklist():
         assert "acceptance checklist" in exc_info.value.detail
 
 
-def test_review_done_to_acceptance_requires_successful_claude_recheck():
+def test_finalize_to_acceptance_requires_successful_claude_finalize():
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     with Session(engine) as session:
         task = create_task(session, TaskCreate(title="Review task", description="Requirement"))
-        task.status = TaskStatus.REVIEW_DONE
+        task.status = TaskStatus.FINALIZE_REQUESTED
         session.add(task)
         session.commit()
 
@@ -77,20 +77,20 @@ def test_review_done_to_acceptance_requires_successful_claude_recheck():
             transition_task(session, task.id, TaskStatus.ACCEPTANCE_READY, "acceptance", "tester")
 
         assert exc_info.value.status_code == 400
-        assert "Claude recheck" in exc_info.value.detail
+        assert "Claude finalize" in exc_info.value.detail
 
 
-def test_review_done_to_acceptance_allows_successful_claude_recheck():
+def test_finalize_to_acceptance_allows_successful_claude_finalize():
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     with Session(engine) as session:
         task = create_task(session, TaskCreate(title="Review task", description="Requirement"))
-        task.status = TaskStatus.REVIEW_DONE
+        task.status = TaskStatus.FINALIZE_REQUESTED
         session.add(task)
         session.add(
             AgentRun(
                 task_id=task.id,
-                run_type="claude_recheck",
+                run_type="claude_finalize",
                 provider_type="claude_cli",
                 status=RunStatus.SUCCEEDED,
             )

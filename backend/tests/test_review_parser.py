@@ -146,6 +146,94 @@ def test_parse_review_file_rejects_invalid_machine_json(tmp_path: Path):
     assert "Invalid REVIEW.md machine JSON" in exc_info.value.detail
 
 
+def test_parse_review_file_reports_machine_json_line_for_unescaped_quote(tmp_path: Path):
+    review = tmp_path / "REVIEW.md"
+    review.write_text(
+        """# REVIEW.md
+
+## 机器可读状态
+
+```json
+{
+  "schema_version": 1,
+  "current_task": "快速排序",
+  "review_status": "FIX_REQUIRED",
+  "recheck_status": "NOT_REQUIRED",
+  "needs_codex_action": true,
+  "summary": "发现问题",
+  "issue_counts": {
+    "HIGH": 1,
+    "MEDIUM": 0,
+    "LOW": 0
+  },
+  "issues": [
+    {
+      "id": "HIGH-1",
+      "severity": "HIGH",
+      "status": "OPEN",
+      "title": "缺少测试",
+      "description": "需求要求"新增一个Test"，但没有添加 @Test 方法。"
+    }
+  ]
+}
+```
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        parse_review_file(str(tmp_path))
+
+    assert exc_info.value.status_code == 422
+    assert "Invalid REVIEW.md machine JSON at line" in exc_info.value.detail
+    assert "未转义英文双引号" in exc_info.value.detail
+    assert "description" in exc_info.value.detail
+
+
+def test_parse_review_file_repairs_chinese_structural_quotes(tmp_path: Path):
+    review = tmp_path / "REVIEW.md"
+    review.write_text(
+        """# REVIEW.md
+
+## 机器可读状态
+
+```json
+{
+  “schema_version”: 1,
+  “current_task”: “快速排序”,
+  “review_status”: “FIX_REQUIRED”,
+  “recheck_status”: “FAILED”,
+  “needs_codex_action”: true,
+  “summary”: “复审未通过，需要继续修复。”,
+  “issue_counts”: {
+    “HIGH”: 1,
+    “MEDIUM”: 0,
+    “LOW”: 0
+  },
+  “issues”: [
+    {
+      “id”: “HIGH-1”,
+      “severity”: “HIGH”,
+      “status”: “OPEN”,
+      “title”: “缺少测试”,
+      “description”: “需求要求“新增一个Test”，但没有添加 @Test 方法。”
+    }
+  ]
+}
+```
+""",
+        encoding="utf-8",
+    )
+
+    result = parse_review_file(str(tmp_path))
+
+    assert result.current_task == "快速排序"
+    assert result.high_count == 1
+    assert result.open_count == 1
+    assert result.recheck_status == "FAILED"
+    assert result.items[0].description == "需求要求“新增一个Test”，但没有添加 @Test 方法。"
+
+
 def test_parse_review_file_falls_back_to_markdown_without_machine_json(tmp_path: Path):
     review = tmp_path / "REVIEW.md"
     review.write_text(

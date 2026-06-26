@@ -4,6 +4,7 @@ from sqlalchemy import inspect, text
 from sqlmodel import Session, SQLModel, create_engine
 
 from app.core.config import get_settings
+from app.core.state_machine import TaskStatus
 import app.models  # noqa: F401
 
 
@@ -14,6 +15,7 @@ engine = create_engine(settings.database_url, pool_pre_ping=True)
 def init_db() -> None:
     SQLModel.metadata.create_all(engine)
     ensure_task_text_columns()
+    ensure_task_status_values()
     ensure_agent_run_columns()
     ensure_command_run_columns()
 
@@ -40,6 +42,29 @@ def ensure_task_text_columns() -> None:
             connection.execute(text("ALTER TABLE taskevent MODIFY COLUMN message TEXT NULL"))
         else:
             connection.execute(text("ALTER TABLE taskevent ALTER COLUMN message TYPE TEXT"))
+
+
+def ensure_task_status_values() -> None:
+    inspector = inspect(engine)
+    if not inspector.has_table("task") or engine.dialect.name != "mysql":
+        return
+
+    values = ", ".join(f"'{status.value}'" for status in TaskStatus)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "ALTER TABLE task "
+                f"MODIFY COLUMN status ENUM({values}) NOT NULL"
+            )
+        )
+        if inspector.has_table("taskevent"):
+            connection.execute(
+                text(
+                    "ALTER TABLE taskevent "
+                    f"MODIFY COLUMN from_status ENUM({values}) NULL, "
+                    f"MODIFY COLUMN to_status ENUM({values}) NULL"
+                )
+            )
 
 
 def ensure_agent_run_columns() -> None:

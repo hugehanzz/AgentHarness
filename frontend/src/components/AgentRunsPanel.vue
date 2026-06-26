@@ -31,6 +31,7 @@ const runTypeLabels: Record<string, string> = {
   claude_review: 'Claude 代码评审',
   codex_fix: 'Codex 修复问题',
   claude_recheck: 'Claude 复审结果',
+  claude_finalize: 'Claude 审查封板',
   codex_acceptance_checklist: 'Codex 生成验收建议',
   codex_archive: 'Codex README 归档',
 }

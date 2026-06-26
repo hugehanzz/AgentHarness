@@ -54,12 +54,12 @@ def has_successful_acceptance_checklist(session: Session, task_id: int) -> bool:
     return run is not None
 
 
-def has_successful_claude_recheck(session: Session, task_id: int) -> bool:
+def has_successful_claude_finalize(session: Session, task_id: int) -> bool:
     run = session.exec(
         select(AgentRun)
         .where(
             AgentRun.task_id == task_id,
-            AgentRun.run_type == "claude_recheck",
+            AgentRun.run_type == "claude_finalize",
             AgentRun.status == RunStatus.SUCCEEDED,
         )
         .order_by(AgentRun.created_at.desc())
@@ -73,11 +73,11 @@ def transition_task(session: Session, task_id: int, to_status: TaskStatus, messa
     if not can_transition(from_status, to_status):
         raise HTTPException(status_code=400, detail=f"Invalid transition: {from_status} -> {to_status}")
     if (
-        from_status == TaskStatus.REVIEW_DONE
+        from_status == TaskStatus.FINALIZE_REQUESTED
         and to_status == TaskStatus.ACCEPTANCE_READY
-        and not has_successful_claude_recheck(session, task.id)
+        and not has_successful_claude_finalize(session, task.id)
     ):
-        raise HTTPException(status_code=400, detail="Claude recheck must finalize REVIEW.md before acceptance")
+        raise HTTPException(status_code=400, detail="Claude finalize must succeed before acceptance is ready")
     # 用证据保护最终验收入口，而不仅仅是点击按钮。
     if (
         from_status == TaskStatus.ACCEPTANCE_READY

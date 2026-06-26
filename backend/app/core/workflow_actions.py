@@ -79,10 +79,8 @@ WORKFLOW_ACTIONS: tuple[WorkflowActionDefinition, ...] = (
     WorkflowActionDefinition(
         action_id="enter_acceptance_after_review",
         from_status=TaskStatus.REVIEW_DONE,
-        to_status=TaskStatus.ACCEPTANCE_READY,
+        to_status=TaskStatus.FINALIZE_REQUESTED,
         label="进入验收",
-        agent_run_type="claude_recheck",
-        agent_run_timing=AgentRunTiming.BEFORE_TRANSITION,
     ),
     WorkflowActionDefinition(
         action_id="request_fix_after_review",
@@ -121,7 +119,7 @@ WORKFLOW_ACTIONS: tuple[WorkflowActionDefinition, ...] = (
     WorkflowActionDefinition(
         action_id="enter_acceptance_after_recheck",
         from_status=TaskStatus.RECHECK_DONE,
-        to_status=TaskStatus.ACCEPTANCE_READY,
+        to_status=TaskStatus.FINALIZE_REQUESTED,
         label="进入验收",
     ),
     WorkflowActionDefinition(
@@ -129,6 +127,12 @@ WORKFLOW_ACTIONS: tuple[WorkflowActionDefinition, ...] = (
         from_status=TaskStatus.RECHECK_DONE,
         to_status=TaskStatus.FIX_REQUIRED,
         label="要求修复",
+    ),
+    WorkflowActionDefinition(
+        action_id="mark_finalize_complete",
+        from_status=TaskStatus.FINALIZE_REQUESTED,
+        to_status=TaskStatus.ACCEPTANCE_READY,
+        label="标记封板完成",
     ),
     WorkflowActionDefinition(
         action_id="mark_acceptance_passed",

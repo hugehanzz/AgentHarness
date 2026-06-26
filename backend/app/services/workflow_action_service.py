@@ -27,6 +27,7 @@ ACTIVE_AGENT_RUN_BY_STATUS: dict[TaskStatus, str] = {
     TaskStatus.REVIEW_REQUESTED: "claude_review",
     TaskStatus.FIXING: "codex_fix",
     TaskStatus.RECHECK_REQUESTED: "claude_recheck",
+    TaskStatus.FINALIZE_REQUESTED: "claude_finalize",
     TaskStatus.ACCEPTANCE_READY: "codex_acceptance_checklist",
     TaskStatus.ARCHIVED: "codex_archive",
 }
@@ -37,6 +38,7 @@ COMPLETION_EVIDENCE_BY_TRANSITION: dict[tuple[TaskStatus, TaskStatus], str] = {
     (TaskStatus.REVIEW_REQUESTED, TaskStatus.REVIEW_DONE): "claude_review",
     (TaskStatus.FIXING, TaskStatus.FIX_DONE): "codex_fix",
     (TaskStatus.RECHECK_REQUESTED, TaskStatus.RECHECK_DONE): "claude_recheck",
+    (TaskStatus.FINALIZE_REQUESTED, TaskStatus.ACCEPTANCE_READY): "claude_finalize",
     (TaskStatus.ACCEPTANCE_READY, TaskStatus.ACCEPTANCE_PASSED): "codex_acceptance_checklist",
     (TaskStatus.ARCHIVED, TaskStatus.DONE): "codex_archive",
 }
@@ -47,6 +49,7 @@ RUN_LABELS: dict[str, str] = {
     "claude_review": "Claude 评审",
     "codex_fix": "Codex 修复",
     "claude_recheck": "Claude 复审",
+    "claude_finalize": "Claude 审查封板",
     "codex_acceptance_checklist": "Codex 验收建议",
     "codex_archive": "Codex 归档",
 }
@@ -65,6 +68,7 @@ STATUS_LABELS: dict[TaskStatus, str] = {
     TaskStatus.FIX_DONE: "修复完成",
     TaskStatus.RECHECK_REQUESTED: "复审中",
     TaskStatus.RECHECK_DONE: "复审完成",
+    TaskStatus.FINALIZE_REQUESTED: "等待审查封板",
     TaskStatus.ACCEPTANCE_READY: "等待人工验收",
     TaskStatus.ACCEPTANCE_PASSED: "验收通过",
     TaskStatus.ARCHIVED: "归档完成",
@@ -161,7 +165,7 @@ def is_recommended_action(
     if definition.from_status in {TaskStatus.REVIEW_DONE, TaskStatus.RECHECK_DONE}:
         if definition.to_status == TaskStatus.FIX_REQUIRED:
             return bool(open_items)
-        if definition.to_status == TaskStatus.ACCEPTANCE_READY:
+        if definition.to_status == TaskStatus.FINALIZE_REQUESTED:
             return not open_items
     return True
 

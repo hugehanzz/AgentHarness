@@ -81,6 +81,7 @@ const flowStageLabels: Record<TaskStatus, string> = {
   FIX_DONE: 'Fix',
   RECHECK_REQUESTED: 'Recheck',
   RECHECK_DONE: 'Recheck',
+  FINALIZE_REQUESTED: 'Accept',
   ACCEPTANCE_READY: 'Accept',
   ACCEPTANCE_PASSED: 'Accept',
   ARCHIVED: 'Archive',

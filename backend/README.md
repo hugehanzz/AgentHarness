@@ -85,6 +85,22 @@ Concurrent Codex runs keep the worker in `RUNNING` until the final active run
 finishes. A stale `RUNNING` record with no in-process run and a heartbeat older
 than 30 seconds is recovered as `FAILED`.
 
+## Review finalization
+
+The nine visible workflow stages are unchanged. Entering acceptance from Review
+or Recheck now moves the task into the internal `FINALIZE_REQUESTED` state,
+which is displayed inside stage 07 Accept.
+
+Claude responsibilities are split across three registered run types:
+
+- `claude_review`: initial code review and issue creation;
+- `claude_recheck`: verify fixes and update issue/recheck status, without sealing;
+- `claude_finalize`: validate that no open issues remain and finalize/archive
+  `REVIEW.md` without performing another general code review.
+
+A successful `claude_finalize` run is required before the
+`FINALIZE_REQUESTED -> ACCEPTANCE_READY` transition can be completed.
+
 ## Test
 
 ```bash

@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { Search } from '@element-plus/icons-vue'
+import { onMounted, ref, watch } from 'vue'
+import { ElMessage } from 'element-plus'
+import { Refresh, Search } from '@element-plus/icons-vue'
 import { api } from '../api/client'
 
 const props = defineProps<{ taskId: number; workspacePath: string | null }>()
 
 const workspacePath = ref(props.workspacePath || '')
 const result = ref<any | null>(null)
+const loading = ref(false)
+const errorMessage = ref('')
 
 function severityText(severity: string) {
   const labels: Record<string, string> = {
@@ -30,12 +33,45 @@ function issueStatusText(status: string) {
 async function parseReview() {
   // REVIEW.md is owned by the reviewer agent in the external workspace. The
   // frontend only asks the backend to parse and mirror it for display.
-  const { data } = await api.post('/reviews/parse', {
-    workspace_path: workspacePath.value,
-    task_id: props.taskId,
-  })
-  result.value = data
+  if (!workspacePath.value.trim()) {
+    errorMessage.value = '请先填写工作区路径。'
+    ElMessage.warning(errorMessage.value)
+    return
+  }
+
+  loading.value = true
+  errorMessage.value = ''
+
+  try {
+    const { data } = await api.post('/reviews/parse', {
+      workspace_path: workspacePath.value.trim(),
+      task_id: props.taskId,
+    })
+    result.value = data
+  } catch (error: any) {
+    result.value = null
+    errorMessage.value =
+      error?.response?.data?.detail || error?.message || 'Review Results 解析失败。'
+    ElMessage.error(errorMessage.value)
+  } finally {
+    loading.value = false
+  }
 }
+
+watch(
+  () => props.workspacePath,
+  (value) => {
+    if (value && value !== workspacePath.value) {
+      workspacePath.value = value
+    }
+  },
+)
+
+onMounted(() => {
+  if (workspacePath.value) {
+    parseReview()
+  }
+})
 </script>
 
 <template>
@@ -44,13 +80,32 @@ async function parseReview() {
       <div>
         <h2 class="panel-title">Review Results</h2>
       </div>
+      <el-button
+        class="icon-button"
+        :icon="Refresh"
+        :loading="loading"
+        circle
+        @click="parseReview"
+      />
     </div>
-    <el-input v-model="workspacePath" placeholder="Workspace path">
+    <el-input
+      v-model="workspacePath"
+      placeholder="Workspace path"
+      @keyup.enter="parseReview"
+    >
       <template #append>
-        <el-button :icon="Search" @click="parseReview" />
+        <el-button :icon="Search" :loading="loading" @click="parseReview" />
       </template>
     </el-input>
-    <div v-if="result" style="margin-top: 12px;">
+    <el-alert
+      v-if="errorMessage"
+      :title="errorMessage"
+      type="error"
+      show-icon
+      :closable="false"
+      style="margin-top: 12px;"
+    />
+    <div v-if="result" v-loading="loading" style="margin-top: 12px;">
       <div class="metric-row review-metric-row">
         <div class="metric review-metric review-metric-high">
           <div class="metric-value">{{ result.high_count }}</div>

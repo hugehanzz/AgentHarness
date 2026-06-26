@@ -49,6 +49,7 @@ STATUS_GUIDANCE: dict[TaskStatus, tuple[str, str, str]] = {
     TaskStatus.FIX_DONE: ("Fix", "修复完成", "Codex 已完成修复，下一步需要让 Claude 复审。"),
     TaskStatus.RECHECK_REQUESTED: ("Recheck", "正在请求复审", "任务已进入复审阶段，下一步需要运行 Claude Recheck。"),
     TaskStatus.RECHECK_DONE: ("Recheck", "复审完成", "Claude 已完成复审，当前需要决定是继续修复，还是进入验收。"),
+    TaskStatus.FINALIZE_REQUESTED: ("Accept", "等待审查封板", "任务已进入验收大阶段，下一步需要运行 Claude 审查封板。"),
     TaskStatus.ACCEPTANCE_READY: ("Accept", "待验收", "任务已经准备好进入人工验收。"),
     TaskStatus.ACCEPTANCE_PASSED: ("Accept", "验收通过", "Human Supervisor 已确认验收通过，下一步需要让 Codex 处理 README 归档。"),
     TaskStatus.ARCHIVED: ("Archive", "已归档", "Codex 已完成 README 归档检查，下一步可以标记任务完成。"),

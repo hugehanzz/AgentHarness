@@ -70,6 +70,36 @@ def make_facts() -> GeminiTaskFacts:
     )
 
 
+def make_finalize_facts(activity_state: WorkflowActivityState = WorkflowActivityState.WAITING_FOR_USER) -> GeminiTaskFacts:
+    facts = make_facts()
+    facts.task.status = TaskStatus.FINALIZE_REQUESTED
+    facts.workflow_guidance.current_stage_label = "Accept"
+    facts.workflow_guidance.current_status_label = "等待审查封板"
+    facts.workflow_guidance.current_position = "任务已进入验收大阶段，下一步需要运行 Claude 审查封板。"
+    facts.workflow_guidance.activity = WorkflowActivity(
+        state=activity_state,
+        message=(
+            "Claude 审查封板正在运行。"
+            if activity_state == WorkflowActivityState.AGENT_RUNNING
+            else "当前流程正在等待用户执行下一步操作。"
+        ),
+        agent_run_type="claude_finalize",
+    )
+    facts.workflow_guidance.available_user_actions = [
+        ResolvedWorkflowAction(
+            action_id="mark_finalize_complete",
+            label="标记封板完成",
+            from_status=TaskStatus.FINALIZE_REQUESTED,
+            to_status=TaskStatus.ACCEPTANCE_READY,
+            enabled=False,
+            recommended=False,
+            instruction="点击「标记封板完成」继续当前流程。",
+            blocked_reason="请先运行并成功完成 Claude 审查封板。",
+        )
+    ]
+    return facts
+
+
 def test_build_gemini_secretary_prompt_includes_facts_and_limits():
     prompt = build_gemini_secretary_prompt(make_facts())
 
@@ -91,6 +121,30 @@ def test_build_gemini_brief_context_omits_internal_workflow_protocol():
     assert "to_status" not in serialized
     assert "IMPLEMENT_DONE" not in serialized
     assert "REVIEW_REQUESTED" not in serialized
+
+
+def test_build_gemini_brief_context_includes_active_agent_button():
+    context = build_gemini_brief_context(make_finalize_facts())
+
+    assert context["active_agent_button"]["label"] == "审查封板"
+    assert context["active_agent_button"]["enabled"] is True
+
+
+def test_fallback_brief_suggests_finalize_agent_button_before_run():
+    brief = gemini_brief_service.build_fallback_brief(make_finalize_facts(), "backend-fallback")
+
+    assert brief.suggested_next_steps == ["点击「审查封板」继续当前流程。"]
+    assert "标记封板完成" not in "\n".join(brief.suggested_next_steps)
+
+
+def test_fallback_brief_waits_while_finalize_is_running():
+    brief = gemini_brief_service.build_fallback_brief(
+        make_finalize_facts(WorkflowActivityState.AGENT_RUNNING),
+        "backend-fallback",
+    )
+
+    assert brief.suggested_next_steps == ["Claude 审查封板正在运行。"]
+    assert "点击" not in brief.suggested_next_steps[0]
 
 
 def test_parse_gemini_brief_json_accepts_json_fence():

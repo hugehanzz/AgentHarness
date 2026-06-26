@@ -73,14 +73,28 @@ def _persist_items(
 
 
 def _parse_machine_state(content: str, review_path: str) -> ReviewParseResult | None:
-    block = _extract_machine_json_block(content)
-    if block is None:
+    extracted = _extract_machine_json_block(content)
+    if extracted is None:
         return None
+    block, block_start_line = extracted
 
     try:
         state = json.loads(block)
     except json.JSONDecodeError as exc:
-        raise HTTPException(status_code=422, detail=f"Invalid REVIEW.md machine JSON: {exc.msg}") from exc
+        repaired_block = _repair_machine_json_smart_quotes(block)
+        if repaired_block != block:
+            try:
+                state = json.loads(repaired_block)
+            except json.JSONDecodeError:
+                raise HTTPException(
+                    status_code=422,
+                    detail=_format_machine_json_error(exc, block, block_start_line),
+                ) from exc
+        else:
+            raise HTTPException(
+                status_code=422,
+                detail=_format_machine_json_error(exc, block, block_start_line),
+            ) from exc
 
     _validate_machine_state(state)
     items = [
@@ -105,27 +119,32 @@ def _parse_machine_state(content: str, review_path: str) -> ReviewParseResult | 
     )
 
 
-def _extract_machine_json_block(content: str) -> str | None:
+def _extract_machine_json_block(content: str) -> tuple[str, int] | None:
     lines = content.splitlines()
-    section_lines = _section_after_heading(lines, (MACHINE_STATE_HEADING,))
-    if not section_lines:
+    section_start = _find_heading_index(lines, (MACHINE_STATE_HEADING,))
+    if section_start is None:
         return None
 
-    blocks: list[str] = []
+    blocks: list[tuple[str, int]] = []
     collecting = False
     current: list[str] = []
-    for line in section_lines:
+    current_start_line = 0
+    for index, line in enumerate(lines[section_start + 1 :], start=section_start + 2):
+        if line.lstrip().startswith("#") and not collecting:
+            break
         stripped = line.strip()
         if stripped == "```json":
             if collecting:
                 raise HTTPException(status_code=422, detail="Nested REVIEW.md machine JSON block")
             collecting = True
             current = []
+            current_start_line = index + 1
             continue
         if collecting and stripped == "```":
             collecting = False
-            blocks.append("\n".join(current))
+            blocks.append(("\n".join(current), current_start_line))
             current = []
+            current_start_line = 0
             continue
         if collecting:
             current.append(line)
@@ -135,6 +154,49 @@ def _extract_machine_json_block(content: str) -> str | None:
     if len(blocks) > 1:
         raise HTTPException(status_code=422, detail="REVIEW.md machine state must contain exactly one JSON block")
     return blocks[0] if blocks else None
+
+
+def _find_heading_index(lines: list[str], headings: tuple[str, ...]) -> int | None:
+    for index, line in enumerate(lines, start=1):
+        normalized = line.strip().strip("# ").lower()
+        if line.lstrip().startswith("#") and any(heading.lower() in normalized for heading in headings):
+            return index - 1
+    return None
+
+
+def _format_machine_json_error(exc: json.JSONDecodeError, block: str, block_start_line: int) -> str:
+    review_line = block_start_line + exc.lineno - 1
+    block_lines = block.splitlines()
+    bad_line = block_lines[exc.lineno - 1].strip() if 0 <= exc.lineno - 1 < len(block_lines) else ""
+    hint = ""
+    if exc.msg == "Expecting ',' delimiter" and '"' in bad_line:
+        hint = "；常见原因是 JSON 字符串内出现未转义英文双引号，请改用中文引号或写成 \\\""
+    if "“" in bad_line or "”" in bad_line:
+        hint = "；JSON 字段名和字符串外壳必须使用英文半角双引号 \"，中文引号 “ ” 只能出现在字符串内容内部"
+    return (
+        f"Invalid REVIEW.md machine JSON at line {review_line}, column {exc.colno}: "
+        f"{exc.msg}. Offending line: {bad_line}{hint}"
+    )
+
+
+def _repair_machine_json_smart_quotes(block: str) -> str:
+    """Tolerate Claude using Chinese smart quotes as JSON syntax.
+
+    This repair is intentionally narrow and in-memory only. It fixes obvious
+    JSON syntax positions such as object keys and one-line string value
+    delimiters, while preserving Chinese quotes inside string content.
+    """
+    lines = block.splitlines()
+    repaired_lines: list[str] = []
+    key_pattern = re.compile(r'(?P<prefix>^|[\s{,])[\u201c\u201d](?P<key>[A-Za-z_][A-Za-z0-9_]*)[\u201c\u201d](?P<suffix>\s*:)')
+    value_pattern = re.compile(r'(?P<prefix>:\s*)[\u201c\u201d](?P<body>.*)[\u201c\u201d](?P<suffix>\s*,?\s*)$')
+
+    for line in lines:
+        repaired = key_pattern.sub(r'\g<prefix>"\g<key>"\g<suffix>', line)
+        repaired = value_pattern.sub(r'\g<prefix>"\g<body>"\g<suffix>', repaired)
+        repaired_lines.append(repaired)
+
+    return "\n".join(repaired_lines)
 
 
 def _validate_machine_state(state: Any) -> None:

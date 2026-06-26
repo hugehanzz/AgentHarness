@@ -22,6 +22,7 @@ const promptTypes = [
   { value: 'CLAUDE_REVIEW', label: 'Claude：代码评审' },
   { value: 'CODEX_FIX', label: 'Codex：修复评审问题' },
   { value: 'CLAUDE_RECHECK', label: 'Claude：复审修复结果' },
+  { value: 'CLAUDE_FINALIZE', label: 'Claude：审查封板' },
   { value: 'ACCEPTANCE_CHECKLIST', label: 'Codex：生成验收清单' },
   { value: 'README_ARCHIVE', label: 'Codex：归档' },
 ]
@@ -46,7 +47,8 @@ const recommendedPromptByStatus: Record<TaskStatus, string> = {
   FIXING: 'CODEX_FIX',
   FIX_DONE: 'CLAUDE_RECHECK',
   RECHECK_REQUESTED: 'CLAUDE_RECHECK',
-  RECHECK_DONE: 'ACCEPTANCE_CHECKLIST',
+  RECHECK_DONE: 'CLAUDE_FINALIZE',
+  FINALIZE_REQUESTED: 'CLAUDE_FINALIZE',
   ACCEPTANCE_READY: 'ACCEPTANCE_CHECKLIST',
   ACCEPTANCE_PASSED: 'README_ARCHIVE',
   ARCHIVED: 'README_ARCHIVE',

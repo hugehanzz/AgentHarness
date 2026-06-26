@@ -99,8 +99,8 @@ def test_resolver_recommends_fix_when_review_has_open_items():
 
         assert actions["要求修复"].recommended is True
         assert actions["进入验收"].recommended is False
-        assert actions["进入验收"].agent_run_type == "claude_recheck"
-        assert actions["进入验收"].agent_run_timing == "before_transition"
+        assert actions["进入验收"].agent_run_type is None
+        assert actions["进入验收"].agent_run_timing is None
 
 
 def test_resolver_recommends_acceptance_when_review_has_no_open_items():
@@ -115,7 +115,34 @@ def test_resolver_recommends_acceptance_when_review_has_no_open_items():
 
         assert actions["进入验收"].recommended is True
         assert actions["要求修复"].recommended is False
-        assert actions["进入验收"].side_effects[0] == "先运行Claude 复审"
+        assert actions["进入验收"].side_effects == ["任务进入“等待审查封板”状态"]
+
+
+def test_resolver_requires_successful_finalize_before_acceptance_ready():
+    with create_memory_session() as session:
+        task = create_task(session, TaskCreate(title="Finalize", description="Requirement"))
+        task.status = TaskStatus.FINALIZE_REQUESTED
+        session.add(task)
+        session.commit()
+
+        state = resolve_task_workflow(session, task.id)
+
+        assert state.activity.agent_run_type == "claude_finalize"
+        assert state.actions[0].label == "标记封板完成"
+        assert state.actions[0].enabled is False
+
+        session.add(
+            AgentRun(
+                task_id=task.id,
+                run_type="claude_finalize",
+                provider_type="claude_cli",
+                status=RunStatus.SUCCEEDED,
+            )
+        )
+        session.commit()
+
+        state = resolve_task_workflow(session, task.id)
+        assert state.actions[0].enabled is True
 
 
 def test_resolver_blocks_acceptance_without_successful_checklist():
