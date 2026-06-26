@@ -4,20 +4,7 @@ AgentHarness 是一个本地运行、由 Human Supervisor 监督的多 Agent 研
 
 当前版本不直接调用 OpenAI、Claude 或 DeepSeek 云端 API，而是通过本机 Codex App Server 和 Claude CLI 接入受控 worker；Gemini 作为系统内部秘书能力，通过受控后端服务调用 Gemini 原生 API。AgentHarness 负责流程编排、状态机、提示词构建、证据保存、人类门禁和前端操作台；真正的代码生成和评审动作发生在用户选择的业务项目 workspace 中。
 
-## 当前架构
-
-- 后端：Python 3.11、FastAPI、SQLModel、MySQL、asyncio。
-- 前端：Vue 3、Vite、Element Plus、Pinia。
-- 测试数据库：后端测试使用 SQLite，不依赖 MySQL。
-- 运行数据库：MySQL。
-- 本地 Agent 接入：Codex App Server、Claude CLI。
-- 系统内部 AI：Gemini，通过后端调用 Gemini 原生 API。
-
-当前真正作为 AgentWorker 登记的只有三个：
-
-- `Codex`：生成计划、执行开发、修复问题、生成验收建议、维护 `README.md` 归档文档。
-- `Claude`：执行代码评审和复审，并维护被评审业务项目的 `REVIEW.md`。
-- `Gemini`：第三个 agent，当前定位为 AgentHarness 的“秘书”，负责使用提醒、进度摘要、门禁提示、任务事实问答和安全流程推进建议。它不能替代 Human Supervisor 批准计划、依赖、验收或高风险修复。
+![AgentHarness Dashboard](docs/images/dashboard.png)
 
 ## 设计特点
 
@@ -28,6 +15,36 @@ AgentHarness 的核心设计是把 agent 能力放进一个可控流程，而不
 在实现上，AgentHarness 采用控制面 / 数据面分离：本仓库保存任务、状态、提示词和运行证据；Codex / Claude 在用户选择的外部业务项目 `workspace_path` 中完成具体开发和评审。前端的 Agent Prompt 面板会展示将发送给 agent 的完整提示词，并允许用户在匹配当前 run type 时手动调整后重新运行。
 
 Accept 阶段不会直接让用户点“验收通过”。系统会先要求 Codex 生成面向人类的验收建议，例如页面操作、API 调用、命令验证、日志检查和通过/打回标准，再由 Human Supervisor 做最终决定。Archive 阶段则由 Codex 维护 `README.md`，让文档记录项目当前事实，而不是沉淀任务流水账。
+
+## 当前架构
+
+- 后端：Python 3.11、FastAPI、SQLModel、MySQL、asyncio。
+- 前端：Vue 3、Vite、Element Plus、Pinia。
+- 测试数据库：后端测试使用 SQLite，不依赖 MySQL。
+- 运行数据库：MySQL。
+- 本地 Agent 接入：Codex App Server、Claude CLI。
+- 系统内部 AI：Gemini，通过后端调用 Gemini 原生 API。
+- 配套测试工程：`examplesProject/AgentHarnessTest`。
+
+当前真正作为 AgentWorker 登记的只有三个：
+
+- `Codex`：生成计划、执行开发、修复问题、生成验收建议、维护 `README.md` 归档文档。
+- `Claude`：执行代码评审和复审，并维护被评审业务项目的 `REVIEW.md`。
+- `Gemini`：第三个 agent，当前定位为 AgentHarness 的“秘书”，负责使用提醒、进度摘要、门禁提示、任务事实问答和安全流程推进建议。它不能替代 Human Supervisor 批准计划、依赖、验收或高风险修复。
+
+## 配套测试工程
+
+仓库内的 `examplesProject/AgentHarnessTest` 是 AgentHarness 的配套测试工程，用于模拟真实业务项目在 AgentHarness 中被计划、开发、评审、修复、复审、封板、验收和归档的完整过程。
+
+该工程当前是一个轻量级 Java / Maven 示例项目，包含业务代码、测试代码、`CLAUDE.md`、`AGENTS.md` 和项目说明文档。其中 `CLAUDE.md` 对 AgentHarness 尤其重要：它定义了 Claude 在审查、复审和封板时维护 `REVIEW.md` 的协议写法，包括机器可解析 JSON、问题状态、复审结论和最终封板规则。
+
+这个测试工程的作用包括：
+
+- 作为 AgentHarness 的端到端验证对象，帮助确认 Codex、Claude、Gemini 和 Human Supervisor gate 是否按预期协同。
+- 作为 Claude Review / Recheck / Finalize 协议样例，便于后续维护 `REVIEW.md` 解析器和提示词模板。
+- 作为系统演示工程，方便新环境快速跑通完整工作流，而不需要先准备真实业务仓库。
+
+运行时生成或频繁变化的文件不应作为稳定文档提交，例如 `.claude/`、`target/`、IDE 配置目录和实时 `REVIEW.md`。如果需要保留某次评审结果作为样例，建议复制为 `REVIEW.sample.md` 后提交。
 
 ## Agent 接入状态
 
