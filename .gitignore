@@ -23,7 +23,15 @@ frontend/dist/
 .vscode/
 
 # Local agent instructions
-AGENTS.md
+/AGENTS.md
+
+# Example / fixture projects
+examples/**/.git/
+examples/**/.claude/
+examples/**/.idea/
+examples/**/target/
+examples/**/*.iml
+examples/**/REVIEW.md
 
 # OS
 .DS_Store
