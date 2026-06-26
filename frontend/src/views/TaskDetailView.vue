@@ -252,11 +252,14 @@ async function executeWorkflowAction(action: WorkflowAction) {
   refreshAgentRuns()
   flowActionRunning.value = action.action_id
   const previousStatus = store.selectedTask?.status
+  const capturedPromptOverride = action.agent_run_type
+    ? promptOverrideForRunType(action.agent_run_type)
+    : null
   try {
     if (action.agent_run_type && action.agent_run_timing === 'before_transition') {
       const run = await runAgentByType(
         action.agent_run_type,
-        promptOverrideForRunType(action.agent_run_type),
+        capturedPromptOverride,
       )
       if (run.status !== 'SUCCEEDED') {
         throw new Error(`${agentRunLabels[action.agent_run_type] || action.agent_run_type} failed`)
@@ -274,7 +277,7 @@ async function executeWorkflowAction(action: WorkflowAction) {
     if (action.agent_run_type && action.agent_run_timing === 'after_transition') {
       await runAgentByType(
         action.agent_run_type,
-        promptOverrideForRunType(action.agent_run_type),
+        capturedPromptOverride,
       )
     }
   } catch (error: any) {

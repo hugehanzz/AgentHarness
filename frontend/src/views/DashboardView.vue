@@ -117,7 +117,6 @@ onMounted(() => {
         <img class="brand-mark" :src="agentHarnessLogo" alt="" aria-hidden="true">
         <div>
           <div class="brand">AgentHarness</div>
-          <div class="brand-subtitle">Human-supervised agent workflow</div>
         </div>
       </div>
       <div class="toolbar">
