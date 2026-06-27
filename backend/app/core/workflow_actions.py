@@ -132,7 +132,9 @@ WORKFLOW_ACTIONS: tuple[WorkflowActionDefinition, ...] = (
         action_id="mark_finalize_complete",
         from_status=TaskStatus.FINALIZE_REQUESTED,
         to_status=TaskStatus.ACCEPTANCE_READY,
-        label="标记封板完成",
+        label="审查封板",
+        agent_run_type="claude_finalize",
+        agent_run_timing=AgentRunTiming.BEFORE_TRANSITION,
     ),
     WorkflowActionDefinition(
         action_id="mark_acceptance_passed",

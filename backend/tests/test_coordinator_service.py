@@ -2,9 +2,12 @@ import asyncio
 
 import pytest
 from fastapi import HTTPException
+from sqlmodel import Session, SQLModel, create_engine
 
+import app.models  # noqa: F401
 from app.core.state_machine import TaskStatus
 from app.models.task import TaskMode
+from app.models.worker import AgentRun, RunStatus
 from app.schemas.coordinator import CoordinatorDecision
 from app.schemas.gemini import (
     GeminiReviewSummary,
@@ -19,9 +22,14 @@ from app.services.coordinator_service import (
     build_coordinator_decision_context,
     generate_coordinator_decision,
     parse_coordinator_decision_json,
+    run_coordinator_step,
+    run_coordinator_until_blocked,
     safe_candidate_actions,
+    validate_coordinator_action_selection,
     validate_coordinator_decision,
 )
+from app.schemas.task import TaskCreate
+from app.services.task_service import create_task
 
 
 def make_facts(
@@ -152,6 +160,15 @@ def test_validate_coordinator_decision_accepts_safe_candidate():
     assert validate_coordinator_decision(decision, make_facts()) == []
 
 
+def test_validate_coordinator_action_selection_accepts_safe_action():
+    result = validate_coordinator_action_selection(make_facts(), "request_review")
+
+    assert result.allowed is True
+    assert result.action is not None
+    assert result.action.action_id == "request_review"
+    assert result.errors == []
+
+
 def test_validate_coordinator_decision_rejects_illegal_action():
     decision = CoordinatorDecision(
         decision="continue",
@@ -162,7 +179,7 @@ def test_validate_coordinator_decision_rejects_illegal_action():
 
     errors = validate_coordinator_decision(decision, make_facts())
 
-    assert any("不在安全候选动作" in error for error in errors)
+    assert any("不属于当前状态" in error for error in errors)
 
 
 def test_validate_coordinator_decision_rejects_continue_when_human_gate_exists():
@@ -176,7 +193,44 @@ def test_validate_coordinator_decision_rejects_continue_when_human_gate_exists()
     errors = validate_coordinator_decision(decision, make_facts(has_gate=True))
 
     assert any("Human Supervisor gate" in error for error in errors)
-    assert any("不在安全候选动作" in error for error in errors)
+
+
+def test_validate_coordinator_action_selection_rejects_disabled_action():
+    facts = make_facts()
+    facts.workflow_guidance.available_user_actions[0].enabled = False
+    facts.workflow_guidance.available_user_actions[0].blocked_reason = "请先运行 Claude 评审。"
+
+    result = validate_coordinator_action_selection(facts, "request_review")
+
+    assert result.allowed is False
+    assert result.action is None
+    assert any("未启用" in error for error in result.errors)
+    assert any("请先运行 Claude 评审" in error for error in result.errors)
+
+
+def test_validate_coordinator_action_selection_rejects_human_gate_action():
+    result = validate_coordinator_action_selection(make_facts(), "mark_acceptance_passed")
+
+    assert result.allowed is False
+    assert result.action is None
+    assert any("需要 Human Supervisor" in error for error in result.errors)
+
+
+def test_validate_coordinator_action_selection_rejects_secretary_mode():
+    result = validate_coordinator_action_selection(make_facts(mode=TaskMode.SECRETARY), "request_review")
+
+    assert result.allowed is False
+    assert any("不是 Coordinator 模式" in error for error in result.errors)
+
+
+def test_validate_coordinator_action_selection_rejects_running_agent():
+    result = validate_coordinator_action_selection(
+        make_facts(activity_state=WorkflowActivityState.AGENT_RUNNING),
+        "request_review",
+    )
+
+    assert result.allowed is False
+    assert any("已有 Agent 正在运行" in error for error in result.errors)
 
 
 def test_generate_coordinator_decision_returns_validation_errors(monkeypatch):
@@ -203,3 +257,396 @@ def test_generate_coordinator_decision_returns_validation_errors(monkeypatch):
     assert result.decision.selected_action_id == "request_review"
     assert result.validation_errors == []
 
+
+def create_memory_session() -> Session:
+    engine = create_engine("sqlite:///:memory:")
+    SQLModel.metadata.create_all(engine)
+    return Session(engine)
+
+
+def test_run_coordinator_step_stops_before_gemini_for_secretary_mode(monkeypatch):
+    async def fail_generate(*args, **kwargs):
+        raise AssertionError("Gemini should not be called for secretary mode")
+
+    monkeypatch.setattr(coordinator_service, "generate_gemini_text", fail_generate)
+
+    with create_memory_session() as session:
+        task = create_task(
+            session,
+            TaskCreate(title="Secretary", description="Requirement", mode=TaskMode.SECRETARY),
+        )
+
+        result = asyncio.run(run_coordinator_step(session, task.id))
+
+        assert result.executed is False
+        assert result.task_status_before == TaskStatus.REQUIREMENT_DRAFT
+        assert result.task_status_after == TaskStatus.REQUIREMENT_DRAFT
+        assert "不是 Coordinator 模式" in result.stop_reason
+
+
+def test_run_coordinator_step_stops_at_human_gate(monkeypatch):
+    async def fail_generate(*args, **kwargs):
+        raise AssertionError("Gemini should not be called for human gate")
+
+    monkeypatch.setattr(coordinator_service, "generate_gemini_text", fail_generate)
+
+    with create_memory_session() as session:
+        task = create_task(
+            session,
+            TaskCreate(title="Plan", description="Requirement", mode=TaskMode.COORDINATOR),
+        )
+        task.status = TaskStatus.PLAN_READY
+        session.add(task)
+        session.commit()
+
+        result = asyncio.run(run_coordinator_step(session, task.id))
+
+        assert result.executed is False
+        assert result.task_status_before == TaskStatus.PLAN_READY
+        assert result.task_status_after == TaskStatus.PLAN_READY
+        assert "Human Supervisor" in result.stop_reason
+
+
+def test_run_coordinator_step_stops_cleanly_when_task_is_done(monkeypatch):
+    async def fail_generate(*args, **kwargs):
+        raise AssertionError("Gemini should not be called after task is done")
+
+    monkeypatch.setattr(coordinator_service, "generate_gemini_text", fail_generate)
+
+    with create_memory_session() as session:
+        task = create_task(
+            session,
+            TaskCreate(title="Done", description="Requirement", mode=TaskMode.COORDINATOR),
+        )
+        task.status = TaskStatus.DONE
+        session.add(task)
+        session.commit()
+
+        result = asyncio.run(run_coordinator_step(session, task.id))
+
+        assert result.executed is False
+        assert result.task_status_before == TaskStatus.DONE
+        assert result.task_status_after == TaskStatus.DONE
+        assert result.stop_reason == "任务流程已经完成。"
+
+
+def test_run_coordinator_step_rejects_gemini_illegal_action(monkeypatch):
+    async def fake_generate(prompt: str):
+        return GeminiTextResponse(
+            ok=True,
+            model="gemini-test",
+            text="""{
+  "decision": "continue",
+  "selected_action_id": "confirm_plan",
+  "confidence": "high",
+  "reason": "错误地尝试确认计划。",
+  "risk_notes": []
+}""",
+            finish_reason="stop",
+        )
+
+    monkeypatch.setattr(coordinator_service, "generate_gemini_text", fake_generate)
+
+    with create_memory_session() as session:
+        task = create_task(
+            session,
+            TaskCreate(title="Build", description="Requirement", mode=TaskMode.COORDINATOR),
+        )
+        task.status = TaskStatus.IMPLEMENT_DONE
+        session.add(task)
+        session.commit()
+
+        result = asyncio.run(run_coordinator_step(session, task.id))
+
+        assert result.executed is False
+        assert result.task_status_before == TaskStatus.IMPLEMENT_DONE
+        assert result.task_status_after == TaskStatus.IMPLEMENT_DONE
+        assert result.validation_errors
+        assert any("不属于当前状态" in error for error in result.validation_errors)
+
+
+def test_run_coordinator_step_executes_transition_without_agent(monkeypatch):
+    async def fake_generate(prompt: str):
+        assert "mark_development_complete" in prompt
+        return GeminiTextResponse(
+            ok=True,
+            model="gemini-test",
+            text="""{
+  "decision": "continue",
+  "selected_action_id": "mark_development_complete",
+  "confidence": "high",
+  "reason": "Codex 开发已成功完成，可以标记开发完成。",
+  "risk_notes": []
+}""",
+            finish_reason="stop",
+        )
+
+    monkeypatch.setattr(coordinator_service, "generate_gemini_text", fake_generate)
+
+    with create_memory_session() as session:
+        task = create_task(
+            session,
+            TaskCreate(title="Implementing", description="Requirement", mode=TaskMode.COORDINATOR),
+        )
+        task.status = TaskStatus.IMPLEMENTING
+        session.add(task)
+        session.add(
+            AgentRun(
+                task_id=task.id,
+                run_type="codex_implement",
+                provider_type="codex_app_server",
+                status=RunStatus.SUCCEEDED,
+            )
+        )
+        session.commit()
+
+        result = asyncio.run(run_coordinator_step(session, task.id))
+
+        assert result.executed is True
+        assert result.action_id == "mark_development_complete"
+        assert result.task_status_before == TaskStatus.IMPLEMENTING
+        assert result.task_status_after == TaskStatus.IMPLEMENT_DONE
+        assert result.agent_run_id is None
+
+
+def test_run_coordinator_step_executes_after_transition_agent_run(monkeypatch):
+    async def fake_generate(prompt: str):
+        assert "request_review" in prompt
+        return GeminiTextResponse(
+            ok=True,
+            model="gemini-test",
+            text="""{
+  "decision": "continue",
+  "selected_action_id": "request_review",
+  "confidence": "high",
+  "reason": "开发已完成，可以请求 Claude 评审。",
+  "risk_notes": []
+}""",
+            finish_reason="stop",
+        )
+
+    async def fake_run_agent(session: Session, task_id: int, run_type: str, prompt_override=None):
+        task = session.get(app.models.Task, task_id)
+        assert task.status == TaskStatus.REVIEW_REQUESTED
+        run = AgentRun(
+            task_id=task_id,
+            run_type=run_type,
+            provider_type="claude_cli",
+            status=RunStatus.SUCCEEDED,
+        )
+        session.add(run)
+        session.commit()
+        session.refresh(run)
+        return run
+
+    monkeypatch.setattr(coordinator_service, "generate_gemini_text", fake_generate)
+    monkeypatch.setattr(coordinator_service, "run_agent", fake_run_agent)
+
+    with create_memory_session() as session:
+        task = create_task(
+            session,
+            TaskCreate(title="Build", description="Requirement", mode=TaskMode.COORDINATOR),
+        )
+        task.status = TaskStatus.IMPLEMENT_DONE
+        session.add(task)
+        session.commit()
+
+        result = asyncio.run(run_coordinator_step(session, task.id))
+
+        assert result.executed is True
+        assert result.action_id == "request_review"
+        assert result.task_status_before == TaskStatus.IMPLEMENT_DONE
+        assert result.task_status_after == TaskStatus.REVIEW_REQUESTED
+        assert result.agent_run_id is not None
+        assert result.agent_run_status == RunStatus.SUCCEEDED
+
+
+def test_run_coordinator_until_blocked_stops_at_next_human_gate(monkeypatch):
+    async def fake_generate(prompt: str):
+        assert "mark_plan_ready" in prompt
+        return GeminiTextResponse(
+            ok=True,
+            model="gemini-test",
+            text="""{
+  "decision": "continue",
+  "selected_action_id": "mark_plan_ready",
+  "confidence": "high",
+  "reason": "Codex 计划已成功完成，可以标记计划已准备。",
+  "risk_notes": []
+}""",
+            finish_reason="stop",
+        )
+
+    monkeypatch.setattr(coordinator_service, "generate_gemini_text", fake_generate)
+
+    with create_memory_session() as session:
+        task = create_task(
+            session,
+            TaskCreate(title="Plan", description="Requirement", mode=TaskMode.COORDINATOR),
+        )
+        task.status = TaskStatus.PLAN_REQUESTED
+        session.add(task)
+        session.add(
+            AgentRun(
+                task_id=task.id,
+                run_type="codex_plan",
+                provider_type="codex_app_server",
+                status=RunStatus.SUCCEEDED,
+            )
+        )
+        session.commit()
+
+        result = asyncio.run(run_coordinator_until_blocked(session, task.id, max_steps=5))
+
+        assert result.executed_steps == 1
+        assert len(result.steps) == 2
+        assert result.steps[0].executed is True
+        assert result.steps[0].action_id == "mark_plan_ready"
+        assert result.steps[0].task_status_after == TaskStatus.PLAN_READY
+        assert result.steps[1].executed is False
+        assert "Human Supervisor" in result.stop_reason
+
+
+def test_run_coordinator_until_blocked_runs_finalize_before_acceptance_gate(monkeypatch):
+    async def fake_generate(prompt: str):
+        assert "mark_finalize_complete" in prompt
+        return GeminiTextResponse(
+            ok=True,
+            model="gemini-test",
+            text="""{
+  "decision": "continue",
+  "selected_action_id": "mark_finalize_complete",
+  "confidence": "high",
+  "reason": "可以执行审查封板并进入人工验收。",
+  "risk_notes": []
+}""",
+            finish_reason="stop",
+        )
+
+    async def fake_run_agent(session: Session, task_id: int, run_type: str, prompt_override=None):
+        task = session.get(app.models.Task, task_id)
+        assert task.status == TaskStatus.FINALIZE_REQUESTED
+        assert run_type == "claude_finalize"
+        run = AgentRun(
+            task_id=task_id,
+            run_type=run_type,
+            provider_type="claude_cli",
+            status=RunStatus.SUCCEEDED,
+        )
+        session.add(run)
+        session.commit()
+        session.refresh(run)
+        return run
+
+    monkeypatch.setattr(coordinator_service, "generate_gemini_text", fake_generate)
+    monkeypatch.setattr(coordinator_service, "run_agent", fake_run_agent)
+
+    with create_memory_session() as session:
+        task = create_task(
+            session,
+            TaskCreate(title="Finalize", description="Requirement", mode=TaskMode.COORDINATOR),
+        )
+        task.status = TaskStatus.FINALIZE_REQUESTED
+        session.add(task)
+        session.commit()
+
+        result = asyncio.run(run_coordinator_until_blocked(session, task.id, max_steps=5))
+
+        assert result.executed_steps == 1
+        assert len(result.steps) == 2
+        assert result.steps[0].executed is True
+        assert result.steps[0].action_id == "mark_finalize_complete"
+        assert result.steps[0].agent_run_status == RunStatus.SUCCEEDED
+        assert result.steps[0].task_status_after == TaskStatus.ACCEPTANCE_READY
+        assert result.steps[1].executed is False
+        assert "Human Supervisor" in result.stop_reason
+
+
+def test_run_coordinator_until_blocked_runs_acceptance_checklist_before_human_pass(monkeypatch):
+    async def fail_generate(*args, **kwargs):
+        raise AssertionError("Gemini should not be called before acceptance checklist is generated")
+
+    async def fake_run_agent(session: Session, task_id: int, run_type: str, prompt_override=None):
+        task = session.get(app.models.Task, task_id)
+        assert task.status == TaskStatus.ACCEPTANCE_READY
+        assert run_type == "codex_acceptance_checklist"
+        run = AgentRun(
+            task_id=task_id,
+            run_type=run_type,
+            provider_type="codex_app_server",
+            status=RunStatus.SUCCEEDED,
+        )
+        session.add(run)
+        session.commit()
+        session.refresh(run)
+        return run
+
+    monkeypatch.setattr(coordinator_service, "generate_gemini_text", fail_generate)
+    monkeypatch.setattr(coordinator_service, "run_agent", fake_run_agent)
+
+    with create_memory_session() as session:
+        task = create_task(
+            session,
+            TaskCreate(title="Acceptance", description="Requirement", mode=TaskMode.COORDINATOR),
+        )
+        task.status = TaskStatus.ACCEPTANCE_READY
+        session.add(task)
+        session.commit()
+
+        result = asyncio.run(run_coordinator_until_blocked(session, task.id, max_steps=5))
+
+        assert result.executed_steps == 1
+        assert len(result.steps) == 1
+        assert result.steps[0].executed is True
+        assert result.steps[0].action_id == "codex_acceptance_checklist"
+        assert result.steps[0].agent_run_status == RunStatus.SUCCEEDED
+        assert result.steps[0].task_status_after == TaskStatus.ACCEPTANCE_READY
+        assert "Human Supervisor" in result.stop_reason
+
+
+def test_run_coordinator_until_blocked_stops_after_agent_failure(monkeypatch):
+    async def fake_generate(prompt: str):
+        assert "request_review" in prompt
+        return GeminiTextResponse(
+            ok=True,
+            model="gemini-test",
+            text="""{
+  "decision": "continue",
+  "selected_action_id": "request_review",
+  "confidence": "high",
+  "reason": "开发已完成，可以请求 Claude 评审。",
+  "risk_notes": []
+}""",
+            finish_reason="stop",
+        )
+
+    async def fake_run_agent(session: Session, task_id: int, run_type: str, prompt_override=None):
+        run = AgentRun(
+            task_id=task_id,
+            run_type=run_type,
+            provider_type="claude_cli",
+            status=RunStatus.FAILED,
+        )
+        session.add(run)
+        session.commit()
+        session.refresh(run)
+        return run
+
+    monkeypatch.setattr(coordinator_service, "generate_gemini_text", fake_generate)
+    monkeypatch.setattr(coordinator_service, "run_agent", fake_run_agent)
+
+    with create_memory_session() as session:
+        task = create_task(
+            session,
+            TaskCreate(title="Build", description="Requirement", mode=TaskMode.COORDINATOR),
+        )
+        task.status = TaskStatus.IMPLEMENT_DONE
+        session.add(task)
+        session.commit()
+
+        result = asyncio.run(run_coordinator_until_blocked(session, task.id, max_steps=5))
+
+        assert result.executed_steps == 1
+        assert len(result.steps) == 1
+        assert result.steps[0].agent_run_status == RunStatus.FAILED
+        assert "did not succeed" in result.stop_reason

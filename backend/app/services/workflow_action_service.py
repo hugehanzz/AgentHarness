@@ -110,7 +110,16 @@ def resolve_action(
     required_run_type = COMPLETION_EVIDENCE_BY_TRANSITION.get(
         (definition.from_status, definition.to_status)
     )
-    evidence = build_evidence(required_run_type, agent_runs) if required_run_type else None
+    needs_preexisting_evidence = not (
+        required_run_type
+        and definition.agent_run_type == required_run_type
+        and definition.agent_run_timing == AgentRunTiming.BEFORE_TRANSITION
+    )
+    evidence = (
+        build_evidence(required_run_type, agent_runs)
+        if required_run_type and needs_preexisting_evidence
+        else None
+    )
     enabled = evidence is None or evidence.satisfied
     blocked_reason = None
     if evidence and not evidence.satisfied:

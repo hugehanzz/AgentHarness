@@ -52,6 +52,16 @@ export const useTasksStore = defineStore('tasks', {
         this.detailLoading = false
       }
     },
+    async refreshTask(id: number) {
+      const [{ data: detail }, { data: workflow }] = await Promise.all([
+        api.get<{ task: Task; events: TaskEvent[] }>(`/tasks/${id}`),
+        api.get<WorkflowState>(`/tasks/${id}/workflow`),
+      ])
+      this.selectedTask = detail.task
+      this.events = detail.events
+      this.workflow = workflow
+      this.detailError = null
+    },
     async fetchWorkflow(id: number) {
       const { data } = await api.get<WorkflowState>(`/tasks/${id}/workflow`)
       this.workflow = data

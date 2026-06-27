@@ -140,3 +140,33 @@ export interface GeminiTaskBrief {
 export interface GeminiTaskFacts {
   facts_version: string
 }
+
+export interface CoordinatorDecision {
+  decision: 'continue' | 'stop'
+  selected_action_id: string | null
+  confidence: 'high' | 'medium' | 'low'
+  reason: string
+  risk_notes: string[]
+}
+
+export interface CoordinatorStepResult {
+  ok: boolean
+  executed: boolean
+  decision: CoordinatorDecision
+  action_id: string | null
+  action_label: string | null
+  task_status_before: TaskStatus
+  task_status_after: TaskStatus
+  agent_run_id: number | null
+  agent_run_status: AgentRun['status'] | null
+  stop_reason: string | null
+  validation_errors: string[]
+}
+
+export interface CoordinatorRunResult {
+  ok: boolean
+  executed_steps: number
+  stopped: boolean
+  stop_reason: string | null
+  steps: CoordinatorStepResult[]
+}

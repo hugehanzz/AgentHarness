@@ -140,7 +140,7 @@ def test_resolver_recommends_acceptance_when_review_has_no_open_items():
         assert actions["进入验收"].side_effects == ["任务进入“等待审查封板”状态"]
 
 
-def test_resolver_requires_successful_finalize_before_acceptance_ready():
+def test_resolver_allows_finalize_action_to_run_before_acceptance_ready():
     with create_memory_session() as session:
         task = create_task(session, TaskCreate(title="Finalize", description="Requirement"))
         task.status = TaskStatus.FINALIZE_REQUESTED
@@ -150,21 +150,10 @@ def test_resolver_requires_successful_finalize_before_acceptance_ready():
         state = resolve_task_workflow(session, task.id)
 
         assert state.activity.agent_run_type == "claude_finalize"
-        assert state.actions[0].label == "标记封板完成"
-        assert state.actions[0].enabled is False
-
-        session.add(
-            AgentRun(
-                task_id=task.id,
-                run_type="claude_finalize",
-                provider_type="claude_cli",
-                status=RunStatus.SUCCEEDED,
-            )
-        )
-        session.commit()
-
-        state = resolve_task_workflow(session, task.id)
+        assert state.actions[0].label == "审查封板"
         assert state.actions[0].enabled is True
+        assert state.actions[0].agent_run_type == "claude_finalize"
+        assert state.actions[0].agent_run_timing == "before_transition"
 
 
 def test_resolver_blocks_acceptance_without_successful_checklist():

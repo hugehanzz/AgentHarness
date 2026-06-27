@@ -27,7 +27,7 @@ FLOW_MATRIX = [
     (
         TaskStatus.FINALIZE_REQUESTED,
         "claude_finalize",
-        {"标记封板完成"},
+        {"审查封板"},
         WorkflowActivityState.AGENT_SUCCEEDED,
     ),
     (

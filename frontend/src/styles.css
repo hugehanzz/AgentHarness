@@ -418,6 +418,60 @@ body {
   background: #dff8e8;
 }
 
+.coordinator-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 16px;
+  padding: 14px 15px;
+  border: 1px solid #dbe8f7;
+  border-radius: 12px;
+  background:
+    radial-gradient(circle at 18px 18px, rgba(103, 104, 255, 0.12), transparent 32px),
+    linear-gradient(180deg, rgba(248, 251, 255, 0.98), rgba(244, 248, 255, 0.92));
+}
+
+.coordinator-main {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.coordinator-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.coordinator-title {
+  color: #1f2937;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.coordinator-description,
+.coordinator-result {
+  color: #475467;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.coordinator-result {
+  display: grid;
+  gap: 3px;
+}
+
+.coordinator-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+}
+
 .primary-action {
   width: 100%;
   min-height: 38px;

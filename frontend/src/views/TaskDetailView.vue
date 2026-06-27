@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Check, Close, Edit, Refresh, Right } from '@element-plus/icons-vue'
+import { ArrowLeft, Check, Close, Edit, MagicStick, Refresh, Right } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import AgentRunsPanel from '../components/AgentRunsPanel.vue'
 import CommandPanel from '../components/CommandPanel.vue'
@@ -10,7 +10,7 @@ import ReviewPanel from '../components/ReviewPanel.vue'
 import WorkerStatus from '../components/WorkerStatus.vue'
 import { api } from '../api/client'
 import { useTasksStore } from '../stores/tasks'
-import type { AgentRun, TaskStatus, WorkflowAction } from '../api/types'
+import type { AgentRun, CoordinatorRunResult, CoordinatorStepResult, TaskStatus, WorkflowAction } from '../api/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -24,6 +24,12 @@ const currentAgentRunning = ref(false)
 const agentRunsRefreshKey = ref(0)
 const agentRuns = ref<AgentRun[]>([])
 const agentPromptDraft = ref({ promptType: '', content: '', matchesCurrentRun: false })
+const coordinatorRunning = ref(false)
+const coordinatorResult = ref<CoordinatorStepResult | null>(null)
+const coordinatorRunResult = ref<CoordinatorRunResult | null>(null)
+const activeRefreshIntervalMs = 2000
+let activeRefreshTimer: ReturnType<typeof window.setInterval> | null = null
+let activeRefreshUsers = 0
 
 const statuses: TaskStatus[] = [
   'REQUIREMENT_DRAFT',
@@ -65,14 +71,7 @@ const activeStageIndex = computed(() => {
 })
 
 const workflowActions = computed(() => {
-  const actions = store.workflow?.actions || []
-  if (
-    store.selectedTask?.status === 'FINALIZE_REQUESTED'
-    && store.workflow?.activity.run_status !== 'SUCCEEDED'
-  ) {
-    return actions.filter((action) => action.action_id !== 'mark_finalize_complete')
-  }
-  return actions
+  return store.workflow?.actions || []
 })
 
 const requirementChanged = computed(() => {
@@ -137,14 +136,20 @@ const currentAgentButtonIcon = computed(() => {
   if (currentAgentRunType.value === 'codex_acceptance_checklist') {
     return store.workflow?.activity.run_status === 'SUCCEEDED' ? Refresh : Right
   }
-  if (currentAgentRunType.value === 'claude_finalize') {
-    return Right
-  }
   return Refresh
 })
 
 const currentRunPromptType = computed(() => {
   return currentAgentRunType.value ? promptTypeByRunType[currentAgentRunType.value] || null : null
+})
+
+const coordinatorButtonsDisabled = computed(() => {
+  return (
+    store.selectedTask?.status === 'DONE'
+    || coordinatorRunning.value
+    || Boolean(flowActionRunning.value)
+    || currentAgentRunning.value
+  )
 })
 
 function statusLabel(status: TaskStatus | null) {
@@ -204,7 +209,36 @@ function refreshAgentRuns() {
   agentRunsRefreshKey.value += 1
 }
 
+function pollActiveWorkflow() {
+  refreshAgentRuns()
+  void store.refreshTask(taskId).catch(() => undefined)
+  void store.fetchTasks().catch(() => undefined)
+  void store.fetchWorkers().catch(() => undefined)
+}
+
+function startActiveWorkflowPolling() {
+  activeRefreshUsers += 1
+  pollActiveWorkflow()
+  if (activeRefreshTimer) return
+  activeRefreshTimer = window.setInterval(pollActiveWorkflow, activeRefreshIntervalMs)
+}
+
+function stopActiveWorkflowPolling() {
+  activeRefreshUsers = Math.max(0, activeRefreshUsers - 1)
+  if (activeRefreshUsers > 0 || !activeRefreshTimer) return
+  window.clearInterval(activeRefreshTimer)
+  activeRefreshTimer = null
+}
+
+function stopAllActiveWorkflowPolling() {
+  activeRefreshUsers = 0
+  if (!activeRefreshTimer) return
+  window.clearInterval(activeRefreshTimer)
+  activeRefreshTimer = null
+}
+
 async function runAgentByType(runType: string, promptOverride?: string | null): Promise<AgentRun> {
+  startActiveWorkflowPolling()
   refreshAgentRuns()
   const payload: { run_type: string; prompt_override?: string } = { run_type: runType }
   if (promptOverride?.trim()) {
@@ -216,7 +250,9 @@ async function runAgentByType(runType: string, promptOverride?: string | null): 
     return data
   } finally {
     refreshAgentRuns()
-    await store.fetchWorkflow(taskId)
+    await store.refreshTask(taskId).catch(() => undefined)
+    void store.fetchTasks().catch(() => undefined)
+    stopActiveWorkflowPolling()
   }
 }
 
@@ -248,7 +284,60 @@ function updateAgentRuns(runs: AgentRun[]) {
   agentRuns.value = runs
 }
 
+async function runCoordinatorStep() {
+  coordinatorRunning.value = true
+  startActiveWorkflowPolling()
+  refreshAgentRuns()
+  try {
+    const { data } = await api.post<CoordinatorStepResult>(`/coordinator/tasks/${taskId}/step`)
+    coordinatorResult.value = data
+    coordinatorRunResult.value = null
+    if (data.executed) {
+      ElMessage.success(`Coordinator executed: ${data.action_label || data.action_id}`)
+    } else {
+      ElMessage.info(data.stop_reason || data.decision.reason || 'Coordinator stopped')
+    }
+    await store.fetchTask(taskId)
+    await store.fetchWorkflow(taskId)
+    void store.fetchTasks().catch(() => undefined)
+    refreshAgentRuns()
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail || error?.message || 'Coordinator step failed')
+  } finally {
+    coordinatorRunning.value = false
+    stopActiveWorkflowPolling()
+  }
+}
+
+async function runCoordinatorUntilBlocked() {
+  coordinatorRunning.value = true
+  startActiveWorkflowPolling()
+  refreshAgentRuns()
+  try {
+    const { data } = await api.post<CoordinatorRunResult>(`/coordinator/tasks/${taskId}/run`, null, {
+      params: { max_steps: 10 },
+    })
+    coordinatorRunResult.value = data
+    coordinatorResult.value = data.steps[data.steps.length - 1] || null
+    if (data.executed_steps > 0) {
+      ElMessage.success(`Coordinator executed ${data.executed_steps} step(s)`)
+    } else {
+      ElMessage.info(data.stop_reason || 'Coordinator stopped')
+    }
+    await store.fetchTask(taskId)
+    await store.fetchWorkflow(taskId)
+    void store.fetchTasks().catch(() => undefined)
+    refreshAgentRuns()
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail || error?.message || 'Coordinator auto-run failed')
+  } finally {
+    coordinatorRunning.value = false
+    stopActiveWorkflowPolling()
+  }
+}
+
 async function executeWorkflowAction(action: WorkflowAction) {
+  startActiveWorkflowPolling()
   refreshAgentRuns()
   flowActionRunning.value = action.action_id
   const previousStatus = store.selectedTask?.status
@@ -284,6 +373,7 @@ async function executeWorkflowAction(action: WorkflowAction) {
     ElMessage.error(error?.response?.data?.detail || error?.message || 'Flow action failed')
   } finally {
     flowActionRunning.value = null
+    stopActiveWorkflowPolling()
   }
 }
 
@@ -322,6 +412,8 @@ onMounted(() => {
   loadTask()
   store.fetchWorkers()
 })
+
+onBeforeUnmount(stopAllActiveWorkflowPolling)
 </script>
 
 <template>
@@ -407,19 +499,6 @@ onMounted(() => {
 
         <div class="copy-row" style="margin-top: 16px;">
           <el-button
-            v-if="
-              currentAgentRunType === 'claude_finalize'
-              && store.workflow?.activity.run_status !== 'SUCCEEDED'
-            "
-            type="primary"
-            :icon="Right"
-            :loading="currentAgentRunning"
-            :disabled="Boolean(flowActionRunning) || currentAgentRunning"
-            @click="runCurrentAgent"
-          >
-            {{ agentRunLabels[currentAgentRunType] }}
-          </el-button>
-          <el-button
             v-if="currentAgentRunType === 'codex_acceptance_checklist'"
             class="acceptance-plan-button"
             :class="{ 'is-repeat': store.workflow?.activity.run_status === 'SUCCEEDED' }"
@@ -469,6 +548,80 @@ onMounted(() => {
           >
             {{ agentRunLabels[currentAgentRunType] || currentAgentRunType }}
           </el-button>
+        </div>
+
+        <div v-if="store.selectedTask.mode === 'coordinator'" class="coordinator-strip">
+          <div class="coordinator-main">
+            <div class="coordinator-title-row">
+              <span class="coordinator-title">Gemini Coordinator</span>
+              <el-tag
+                size="small"
+                :type="coordinatorResult?.executed ? 'success' : 'info'"
+                effect="plain"
+              >
+                {{
+                  coordinatorRunResult
+                    ? `${coordinatorRunResult.executed_steps} Step(s)`
+                    : coordinatorResult?.executed ? 'Executed' : 'Ready'
+                }}
+              </el-tag>
+            </div>
+            <div v-if="coordinatorResult" class="coordinator-result">
+              <div>
+                <span class="muted">最近决策：</span>
+                <span>
+                  {{
+                    coordinatorResult.executed
+                      ? `已执行「${coordinatorResult.action_label || coordinatorResult.action_id}」`
+                      : '已停止'
+                  }}
+                </span>
+              </div>
+              <div>
+                <span class="muted">原因：</span>
+                <span>{{ coordinatorResult.stop_reason || coordinatorResult.decision.reason }}</span>
+              </div>
+              <div v-if="coordinatorResult.executed">
+                <span class="muted">状态：</span>
+                <span>{{ statusLabel(coordinatorResult.task_status_before) }} -> {{ statusLabel(coordinatorResult.task_status_after) }}</span>
+              </div>
+              <div v-if="coordinatorResult.agent_run_status">
+                <span class="muted">Agent Run：</span>
+                <span>#{{ coordinatorResult.agent_run_id }} / {{ coordinatorResult.agent_run_status }}</span>
+              </div>
+              <div v-if="coordinatorResult.validation_errors.length">
+                <span class="muted">后端校验：</span>
+                <span>{{ coordinatorResult.validation_errors.join('；') }}</span>
+              </div>
+              <div v-if="coordinatorResult.decision.risk_notes.length">
+                <span class="muted">风险：</span>
+                <span>{{ coordinatorResult.decision.risk_notes.join('；') }}</span>
+              </div>
+              <div v-if="coordinatorRunResult">
+                <span class="muted">自动推进：</span>
+                <span>本轮执行 {{ coordinatorRunResult.executed_steps }} 步，停止原因：{{ coordinatorRunResult.stop_reason || '达到停止条件' }}</span>
+              </div>
+            </div>
+          </div>
+          <div class="coordinator-actions">
+            <el-button
+              :icon="MagicStick"
+              :loading="coordinatorRunning"
+              :disabled="coordinatorButtonsDisabled"
+              @click="runCoordinatorStep"
+            >
+              单步推进
+            </el-button>
+            <el-button
+              type="primary"
+              :icon="MagicStick"
+              :loading="coordinatorRunning"
+              :disabled="coordinatorButtonsDisabled"
+              @click="runCoordinatorUntilBlocked"
+            >
+              自动推进
+            </el-button>
+          </div>
         </div>
       </section>
 
