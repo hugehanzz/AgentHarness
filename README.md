@@ -2,7 +2,7 @@
 
 AgentHarness 是一个本地运行、由 Human Supervisor 监督的多 Agent 研发工作流控制台。项目目标是把“需求 -> 计划 -> 开发 -> [ 评审 -> 修复 -> 复审 ] -> 验收 -> 归档”的研发链路产品化，让 Codex、Claude 等本地 Agent 在可观测、可追溯、可人工介入的流程中协作。
 
-当前版本不直接调用 OpenAI、Claude 或 DeepSeek 云端 API，而是通过本机 Codex App Server 和 Claude CLI 接入受控 worker；Gemini 作为系统内部 Secretary / Coordinator 能力，通过受控后端服务调用 Gemini 原生 API。AgentHarness 负责流程编排、状态机、提示词构建、证据保存、人类门禁和前端操作台；真正的代码生成和评审动作发生在用户选择的业务项目 workspace 中。
+当前版本不直接调用 OpenAI、Claude 或 DeepSeek 云端 API，而是通过本机 Codex App Server 和 Claude CLI 接入受控 worker；Gemini 作为系统内部的任务秘书与流程协调者，通过受控后端服务调用 Gemini 原生 API。AgentHarness 负责流程编排、状态机、提示词构建、证据保存、人类门禁和前端操作台；真正的代码生成和评审动作发生在用户选择的业务项目 workspace 中。
 
 ![AgentHarness Dashboard](docs/images/dashboard.png)
 
