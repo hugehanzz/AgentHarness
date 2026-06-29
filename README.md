@@ -2,7 +2,7 @@
 
 AgentHarness 是一个本地运行、由 Human Supervisor 监督的多 Agent 研发工作流控制台。项目目标是把“需求 -> 计划 -> 开发 -> [ 评审 -> 修复 -> 复审 ] -> 验收 -> 归档”的研发链路产品化，让 Codex、Claude 等本地 Agent 在可观测、可追溯、可人工介入的流程中协作。
 
-当前版本不直接调用 OpenAI、Claude 或 DeepSeek 云端 API，而是通过本机 Codex App Server 和 Claude CLI 接入受控 worker；Gemini 作为系统内部秘书能力，通过受控后端服务调用 Gemini 原生 API。AgentHarness 负责流程编排、状态机、提示词构建、证据保存、人类门禁和前端操作台；真正的代码生成和评审动作发生在用户选择的业务项目 workspace 中。
+当前版本不直接调用 OpenAI、Claude 或 DeepSeek 云端 API，而是通过本机 Codex App Server 和 Claude CLI 接入受控 worker；Gemini 作为系统内部 Secretary / Coordinator 能力，通过受控后端服务调用 Gemini 原生 API。AgentHarness 负责流程编排、状态机、提示词构建、证据保存、人类门禁和前端操作台；真正的代码生成和评审动作发生在用户选择的业务项目 workspace 中。
 
 ![AgentHarness Dashboard](docs/images/dashboard.png)
 
@@ -16,6 +16,8 @@ AgentHarness 的核心设计是把 agent 能力放进一个可控流程，而不
 
 Accept 阶段不会直接让用户点“验收通过”。系统会先要求 Codex 生成面向人类的验收建议，例如页面操作、API 调用、命令验证、日志检查和通过/打回标准，再由 Human Supervisor 做最终决定。Archive 阶段则由 Codex 维护 `README.md`，让文档记录项目当前事实，而不是沉淀任务流水账。
 
+Coordinator 模式是在这个控制面之上的半自动推进层：Gemini 负责阅读后端提供的只读任务事实，并在候选安全动作中选择下一步；后端负责校验动作是否合法、是否命中 Human gate、是否已有 agent 正在运行，以及是否允许继续执行。Gemini 不能直接改库、直接点前端按钮、绕过状态机或修改外部业务项目。
+
 ## 当前架构
 
 - 后端：Python 3.11、FastAPI、SQLModel、MySQL、asyncio。
@@ -23,14 +25,14 @@ Accept 阶段不会直接让用户点“验收通过”。系统会先要求 Cod
 - 测试数据库：后端测试使用 SQLite，不依赖 MySQL。
 - 运行数据库：MySQL。
 - 本地 Agent 接入：Codex App Server、Claude CLI。
-- 系统内部 AI：Gemini，通过后端调用 Gemini 原生 API。
+- 系统内部 AI：Gemini，通过后端调用 Gemini 原生 API，支持 Secretary 简报 / 问答和 Coordinator 半自动流程推进。
 - 配套测试工程：`examplesProject/AgentHarnessTest`。
 
 当前真正作为 AgentWorker 登记的只有三个：
 
 - `Codex`：生成计划、执行开发、修复问题、生成验收建议、维护 `README.md` 归档文档。
 - `Claude`：执行代码评审和复审，并维护被评审业务项目的 `REVIEW.md`。
-- `Gemini`：第三个 agent，当前定位为 AgentHarness 的“秘书”，负责使用提醒、进度摘要、门禁提示、任务事实问答和安全流程推进建议。它不能替代 Human Supervisor 批准计划、依赖、验收或高风险修复。
+- `Gemini`：第三个 agent，承担 Secretary 和 Coordinator 两类职责。Secretary 负责使用提醒、进度摘要、门禁提示和任务事实问答；Coordinator 在用户创建的任务中，可以基于后端提供的候选安全动作选择下一步，并由后端执行合法动作。它不能替代 Human Supervisor 批准计划、依赖、验收或高风险修复。
 
 ## 配套测试工程
 
@@ -44,7 +46,7 @@ Accept 阶段不会直接让用户点“验收通过”。系统会先要求 Cod
 - 作为 Claude Review / Recheck / Finalize 协议样例，便于后续维护 `REVIEW.md` 解析器和提示词模板。
 - 作为系统演示工程，方便新环境快速跑通完整工作流，而不需要先准备真实业务仓库。
 
-运行时生成或频繁变化的文件不应作为稳定文档提交，例如 `.claude/`、`target/`、IDE 配置目录和实时 `REVIEW.md`。如果需要保留某次评审结果作为样例，建议复制为 `REVIEW.sample.md` 后提交。
+建议：AgentHarness应作为AgentHarness的同级项目运行，不应作为本系统的子项目运行。
 
 ## Agent 接入状态
 
@@ -116,7 +118,7 @@ Bash
 
 ### Gemini API
 
-Gemini 作为系统内部 Secretary agent 接入，不在外部业务项目 `workspace_path` 中执行命令，也不直接修改业务代码。后端通过 Gemini 原生 API 调用模型：
+Gemini 作为系统内部 Secretary / Coordinator agent 接入，不在外部业务项目 `workspace_path` 中执行命令，也不直接修改业务代码。后端通过 Gemini 原生 API 调用模型：
 
 ```text
 models/{model}:generateContent
@@ -140,13 +142,16 @@ GEMINI_PROXY_URL=http://127.0.0.1:7890
 - 使用 `facts_version` 标识事实层版本，供前端缓存和判断 Gemini brief 是否过期。
 - 调用 `generateContent` 生成结构化任务简报。
 - 调用 `streamGenerateContent?alt=sse` 提供 Gemini 对话流式回复。
-- 将 Gemini 限定为 Secretary Mode：只做总结、解释、问答、风险提示和下一步建议。
+- 为 Coordinator 模式构建可执行候选动作、只读事实包和决策提示词，要求 Gemini 返回结构化决策 JSON。
+- 校验 Gemini 选择的动作是否属于当前任务、当前状态、当前模式下允许的合法候选动作之一。
 
 当前 Gemini 能力：
 
 - 首页 Gemini 对话框：展示固定问候，并支持普通秘书式问答。
 - 任务详情 Gemini 对话框：基于当前任务 facts 回答进度、gate、风险和下一步问题。
 - 任务 brief：在 `PLAN_READY`、`IMPLEMENT_DONE`、`REVIEW_DONE`、`RECHECK_DONE`、`ACCEPTANCE_READY`、`ACCEPTANCE_PASSED`、`ARCHIVED` 和 `DONE` 等关键状态后台预热，并基于 `facts_version` 缓存；即使弹窗未打开，也会执行预热。
+- Coordinator 单步推进：在用户点击任务详情页的“单步推进”后，由后端调用 Gemini 选择下一步动作，校验通过后执行一次流程推进。
+- Coordinator 自动推进直到阻塞：在用户点击“自动推进直到阻塞”后，后端循环执行 Coordinator 单步推进，直到遇到 Human gate、没有安全候选动作、已有 agent 正在运行、Gemini 决定停止、动作校验失败、agent 运行失败或达到最大步数。
 - Gemini 对话仅保存在当前前端会话内；关闭弹窗或点击弹窗刷新按钮时，会清空当前页面作用域下的用户与 Gemini 对话。
 - SSE 流式输出：后端转发 Gemini 原生 stream delta，前端实时刷新消息气泡。
 
@@ -156,7 +161,8 @@ GEMINI_PROXY_URL=http://127.0.0.1:7890
 - 不能批准验收。
 - 不能安装依赖。
 - 不能绕过 Human Supervisor gate。
-- 不能直接触发 worker run 或修改任务状态。
+- 不能直接触发 worker run 或修改任务状态；Coordinator 只能通过后端受控 action validator 和状态机执行。
+- 不能在非 Coordinator 模式任务中执行自动流程推进。
 - 不能直接修改外部业务项目代码。
 
 ## Worker 状态与心跳
@@ -244,6 +250,17 @@ DONE
 - 不让 AgentHarness 直接越过 worker 修改外部业务项目代码。
 - 不让 Codex 修改业务项目的 `REVIEW.md`，该文件由 Claude-DeepSeek 维护。
 
+Coordinator 模式不改变这 9 个大阶段，也不新增数据库层面的“大状态”。它只是在不触及 Human gate 的小阶段上执行“继续下一步”的操作，例如请求评审、请求修复、请求复审、进入验收、审查封板、请求归档等。
+
+Coordinator 的推进边界：
+
+- 遇到 `PLAN_READY` 时必须停止，等待 Human Supervisor 确认计划。
+- 遇到 `ACCEPTANCE_READY` 且尚未生成验收方案时，可以请求 Codex 生成验收方案。
+- 生成验收方案后必须停止，等待 Human Supervisor 标记验收通过。
+- 如果 Review 结果中存在 `OPEN` 或 `FIXED_PENDING_RECHECK` 问题，视为仍有未关闭问题，不能直接进入验收或封板。
+- 如果当前已有 AgentRun 正在运行，Coordinator 不会继续启动新的 agent。
+- 如果 Gemini 返回停止、置信度不足、动作不在候选列表中或后端校验不通过，Coordinator 会停止并把原因展示给用户。
+
 ## 当前前端能力
 
 任务详情页当前包含：
@@ -251,6 +268,7 @@ DONE
 - 9 阶段 Flow State。
 - 可编辑的 Requirement 面板。
 - Agent Prompt 面板：实时预览提示词、选择模板、点击 Edit 后可手动编辑。
+- Coordinator 面板：仅在 `coordinator` 模式任务中显示，提供“单步推进”和“自动推进直到阻塞”，并展示 Gemini 决策、后端校验结果、执行动作、阻塞原因和 agent 运行结果。
 - Agent Runs 面板：展示执行历史、输出、诊断信息和运行证据。
 - Workers 面板：展示数据库中的 `ONLINE`、`RUNNING`、`FAILED`、`OFFLINE` 状态和最近心跳，并通过 Pinia 与浮动 Agent 图标联动。
 - Review Results 面板：读取并解析外部业务项目的 `REVIEW.md`。
@@ -295,6 +313,11 @@ Agent Runs 刷新规则：
 - 如果用户不选择新路径，会默认使用上一次路径。
 - placeholder 也显示上一次路径。
 
+新建任务时可以选择工作流模式：
+
+- `Secretary`：Gemini 只提供简报、问答、提醒和下一步建议，不自动推进流程。
+- `Coordinator`：Gemini 可以在任务详情页通过“单步推进”或“自动推进直到阻塞”参与流程决策；实际执行仍由后端状态机、action validator 和 agent provider 适配器完成。
+
 ## 后端服务
 
 当前主要 API：
@@ -308,6 +331,8 @@ Agent Runs 刷新规则：
 - `/gemini/tasks/{task_id}/facts`：为 Gemini Secretary 构建只读任务事实包。
 - `/gemini/tasks/{task_id}/brief`：调用 Gemini Secretary 生成结构化任务简报。
 - `/gemini/tasks/{task_id}/chat/stream`：任务详情页 Gemini 对话流式回复，基于当前任务 facts 生成上下文。
+- `/coordinator/tasks/{task_id}/step`：对 Coordinator 模式任务执行一次受控推进；后端会构建候选动作、调用 Gemini 决策、校验动作并执行。
+- `/coordinator/tasks/{task_id}/run`：从当前状态开始连续执行 Coordinator 推进，直到 blocked、Human gate、agent running、agent failed、无安全动作或达到最大步数。
 - `/reviews`：读取并解析 workspace 中的 `REVIEW.md`。
 - `/commands`：运行已注册安全命令。
 - `/filesystem`：选择 workspace 路径。
@@ -337,10 +362,13 @@ backend/app/prompts/templates.py
 - `CLAUDE_REVIEW`
 - `CODEX_FIX`
 - `CLAUDE_RECHECK`
+- `CLAUDE_FINALIZE`
 - `ACCEPTANCE_CHECKLIST`
 - `README_ARCHIVE`
 
 Prompt preview 是无状态的：根据当前任务和 prompt 类型实时生成。真正发送给 agent 的最终提示词会保存在 AgentRun 的 `input_payload` 中，方便后续追溯和复盘。
+
+Coordinator 的 Gemini 决策提示词由后端服务根据当前 task facts、候选动作和安全边界动态构建。Gemini 返回的决策必须是结构化 JSON，后端只接受 `continue` 或 `stop`，并且只会执行通过 action validator 校验的 `selected_action_id`。
 
 ## Review 和 Archive
 
@@ -429,11 +457,8 @@ npm run build
 
 ## 当前限制
 
-- Gemini 已接入前端 Secretary UI、任务 brief、首页/任务详情页对话框和原生 API 流式回复，但尚未具备自动调度权限。
+- Gemini 已接入前端 Secretary UI、任务 brief、首页/任务详情页对话框、原生 API 流式回复和 Coordinator 半自动推进能力；Coordinator 目前由用户在任务详情页显式触发，不是后台无人值守守护进程。
+- Coordinator 自动推进仍受 Human Supervisor gate 约束：不会确认计划、不会标记验收通过、不会安装依赖，也不会绕过后端不安全或不确定的动作判断。
 - Gemini 对话目前是前端内存会话；关闭或刷新 Gemini 弹窗会清空当前对话，且聊天记录尚未持久化到数据库。
-- Gemini 流式回复已经按 SSE delta 实时刷新前端，但首包时间仍取决于 Gemini 服务、代理节点和模型响应速度。
 - 当前尚未持久化 Gemini API 调用日志，因此不能直接统计每个任务的调用次数、触发来源、耗时、首 Token 时间、token 用量、重试次数或成本。
-- Codex / Claude 仍依赖本机 Codex App Server 和 Claude CLI；Gemini 通过受控后端服务调用，不能绕过后端 policy 或 Human Supervisor gate。
 - Claude CLI 通过工具白名单禁用 Bash，但以当前 Windows 用户身份运行，并非操作系统级只读沙箱；当前主要依靠工具限制和提示词约束其写入范围。
-- Human Supervisor 门禁保持人工决策。
-- Safe Commands 只允许白名单命令。
