@@ -2,9 +2,23 @@ from app.models.prompt import PromptType
 from app.models.task import Task
 
 
+DEFAULT_PROJECT_NAME = "AgentHarness 托管工作区"
+
+
+def project_name_from_workspace(workspace_path: str | None) -> str:
+    if not workspace_path:
+        return DEFAULT_PROJECT_NAME
+
+    normalized = workspace_path.strip().replace("\\", "/").rstrip("/")
+    if not normalized:
+        return DEFAULT_PROJECT_NAME
+
+    return normalized.rsplit("/", 1)[-1] or DEFAULT_PROJECT_NAME
+
+
 def build_prompt(task: Task, prompt_type: PromptType) -> str:
-    base = f"""项目：AgentHarness 托管工作区
-任务 ID：{task.id}
+    project_name = project_name_from_workspace(task.workspace_path)
+    base = f"""项目：{project_name}
 任务标题：{task.title}
 当前状态：{task.status}
 工作区路径：{task.workspace_path or "未提供"}

@@ -19,7 +19,45 @@ def test_preview_prompt_does_not_create_prompt_table_or_record():
         content = preview_prompt(session, task.id, PromptType.CODEX_PLAN)
 
         assert "任务标题：Preview task" in content
+        assert f"任务 ID：{task.id}" not in content
         assert not inspect(engine).has_table("promptrecord")
+
+
+def test_prompt_project_name_uses_workspace_leaf_directory():
+    task = type(
+        "TaskStub",
+        (),
+        {
+            "id": 26,
+            "title": "Automation",
+            "status": "DONE",
+            "workspace_path": r"D:\codexProject\AgentHarnessTest",
+            "description": "Requirement",
+        },
+    )()
+
+    content = build_prompt(task, PromptType.CODEX_PLAN)
+
+    assert "项目：AgentHarnessTest" in content
+    assert r"工作区路径：D:\codexProject\AgentHarnessTest" in content
+
+
+def test_prompt_project_name_falls_back_without_workspace_path():
+    task = type(
+        "TaskStub",
+        (),
+        {
+            "id": 1,
+            "title": "No workspace",
+            "status": "REQUIREMENT_DRAFT",
+            "workspace_path": None,
+            "description": "Requirement",
+        },
+    )()
+
+    content = build_prompt(task, PromptType.CODEX_PLAN)
+
+    assert "项目：AgentHarness 托管工作区" in content
 
 
 def test_claude_recheck_and_finalize_prompts_keep_separate_responsibilities():

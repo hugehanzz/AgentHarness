@@ -223,7 +223,11 @@ onMounted(() => {
 
         <div class="workflow-table-wrap">
           <el-table class="workflow-table" :data="pagedTasks" @row-click="(row: any) => router.push(`/tasks/${row.id}`)">
-            <el-table-column prop="id" label="ID" width="80" />
+            <el-table-column label="ID" width="80">
+              <template #default="{ $index }">
+                {{ (taskPage - 1) * taskPageSize + $index + 1 }}
+              </template>
+            </el-table-column>
             <el-table-column label="Task" min-width="260">
               <template #default="{ row }">
                 <div class="task-title-cell">
