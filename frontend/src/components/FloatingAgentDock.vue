@@ -911,34 +911,15 @@ onBeforeUnmount(() => {
 
 .floating-agent-icon.is-claude-working {
   border-color: rgba(217, 119, 87, 0.62);
-  box-shadow:
-    0 14px 28px rgba(16, 24, 40, 0.16),
-    0 0 24px rgba(196, 104, 74, 0.38),
-    0 0 42px rgba(124, 91, 180, 0.24);
-  animation: claude-working-glow 1.8s ease-in-out infinite;
-}
-
-@keyframes claude-working-glow {
-  0%,
-  100% {
-    box-shadow:
-      0 14px 28px rgba(16, 24, 40, 0.16),
-      0 0 18px rgba(196, 104, 74, 0.28),
-      0 0 30px rgba(124, 91, 180, 0.16);
-  }
-
-  50% {
-    box-shadow:
-      0 16px 32px rgba(16, 24, 40, 0.2),
-      0 0 28px rgba(217, 119, 87, 0.52),
-      0 0 48px rgba(124, 91, 180, 0.3);
-  }
+  animation: gemini-working-float 2.4s ease-in-out infinite;
 }
 
 .floating-agent-icon.is-working::before,
 .floating-agent-icon.is-working::after,
 .floating-agent-icon.is-codex-working::before,
-.floating-agent-icon.is-codex-working::after {
+.floating-agent-icon.is-codex-working::after,
+.floating-agent-icon.is-claude-working::before,
+.floating-agent-icon.is-claude-working::after {
   position: absolute;
   inset: -7px;
   z-index: -1;
@@ -981,6 +962,23 @@ onBeforeUnmount(() => {
   animation: gemini-working-ring 1.8s ease-out infinite;
 }
 
+.floating-agent-icon.is-claude-working::before {
+  background: radial-gradient(
+    circle,
+    rgba(255, 174, 112, 0.44) 0%,
+    rgba(217, 119, 87, 0.26) 46%,
+    rgba(217, 119, 87, 0) 74%
+  );
+  filter: blur(7px);
+  animation: gemini-working-glow 1.8s ease-in-out infinite;
+}
+
+.floating-agent-icon.is-claude-working::after {
+  inset: -4px;
+  border: 1px solid rgba(217, 119, 87, 0.58);
+  animation: gemini-working-ring 1.8s ease-out infinite;
+}
+
 .floating-agent-icon.is-working:hover,
 .floating-agent-icon.is-working:focus-visible {
   border-color: rgba(66, 133, 244, 0.72);
@@ -996,6 +994,14 @@ onBeforeUnmount(() => {
     0 16px 34px rgba(16, 24, 40, 0.2),
     0 0 24px rgba(79, 70, 229, 0.42),
     0 0 42px rgba(91, 33, 182, 0.22);
+}
+
+.floating-agent-icon.is-claude-working:hover,
+.floating-agent-icon.is-claude-working:focus-visible {
+  border-color: rgba(217, 119, 87, 0.78);
+  box-shadow:
+    0 16px 34px rgba(16, 24, 40, 0.2),
+    0 0 24px rgba(217, 119, 87, 0.4);
 }
 
 @keyframes gemini-working-glow {
@@ -1042,7 +1048,9 @@ onBeforeUnmount(() => {
   .floating-agent-icon.is-working::before,
   .floating-agent-icon.is-working::after,
   .floating-agent-icon.is-codex-working::before,
-  .floating-agent-icon.is-codex-working::after {
+  .floating-agent-icon.is-codex-working::after,
+  .floating-agent-icon.is-claude-working::before,
+  .floating-agent-icon.is-claude-working::after {
     animation: none;
   }
 
@@ -1056,6 +1064,12 @@ onBeforeUnmount(() => {
     box-shadow:
       0 14px 28px rgba(16, 24, 40, 0.16),
       0 0 22px rgba(79, 70, 229, 0.42);
+  }
+
+  .floating-agent-icon.is-claude-working {
+    box-shadow:
+      0 14px 28px rgba(16, 24, 40, 0.16),
+      0 0 22px rgba(217, 119, 87, 0.4);
   }
 }
 
